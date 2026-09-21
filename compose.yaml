@@ -32,7 +32,7 @@ services:
       - /opt/tiktok-secrets:/run/secrets/tiktok:ro
 
   proxy:
-    image: ghcr.io/metacubex/mihomo:latest
+    image: metacubex/mihomo:v1.19.31
     profiles: ["proxy"]
     restart: unless-stopped
     command: ["-d", "/root/.config/mihomo", "-f", "/root/.config/mihomo/config.yaml"]
