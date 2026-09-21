@@ -186,13 +186,17 @@ class AnalysisPipelineTests(unittest.TestCase):
                 enqueue(conn, "9000")
             job = claim_job(db)
 
-            def fake_download(_url, target):
+            download_sessions = []
+
+            def fake_download(_url, target, *, session=None):
+                download_sessions.append(session)
                 target.write_bytes(b"0000ftyp" + b"x" * 2048)
 
             with patch("analysis_pipeline.TMP_ROOT", tmp), patch("analysis_pipeline.fetch_subtitles_and_comments", return_value=([], [], [], "")), patch("analysis_pipeline.download_media", side_effect=fake_download), patch("analysis_pipeline.extract_keyframes", side_effect=RuntimeError("frame error")):
                 with self.assertRaises(RuntimeError):
                     process_job(job, db)
             self.assertEqual([], list(tmp.glob("*.mp4")))
+            self.assertIsNotNone(download_sessions[0])
 
 
 if __name__ == "__main__":

@@ -770,6 +770,23 @@ def _load_tiktok_cookies(session: requests.Session) -> None:
         return
 
 
+def tiktok_download_session() -> requests.Session:
+    """Create a TikTok-only browser-like session for CDN media retrieval.
+
+    This session is scoped to download and detail enrichment. Model providers are
+    always called through ``model_session`` and never receive these cookies.
+    """
+    session = requests.Session()
+    session.trust_env = False
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Referer": "https://www.tiktok.com/",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    _load_tiktok_cookies(session)
+    return session
+
+
 def _detail_play_url(item: dict[str, Any]) -> str:
     video = item.get("video") or {}
     for key in ("playAddr", "playAddrH264", "play_addr"):
@@ -1004,7 +1021,11 @@ def process_job(job: sqlite3.Row, db_path: Path = VIDEO_DB) -> None:
         with tempfile.NamedTemporaryFile(prefix=f"{job['material_id']}_", suffix=".mp4", dir=TMP_ROOT, delete=False) as temporary:
             media_file = Path(temporary.name)
         subtitles, comments, missing, fresh_media_url = fetch_subtitles_and_comments(str(payload.get("detail_url", "")), job["material_id"])
-        download_media(fresh_media_url or str(payload.get("video_url", "")), media_file)
+        download_session = tiktok_download_session()
+        try:
+            download_media(fresh_media_url or str(payload.get("video_url", "")), media_file, session=download_session)
+        finally:
+            download_session.close()
         frames = extract_keyframes(media_file, job["material_id"])
         request = build_vlm_request(row, payload, evaluation, frames, subtitles, comments, missing)
         report = call_vlm(request)
