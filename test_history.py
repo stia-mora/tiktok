@@ -44,14 +44,14 @@ class HistoryTests(unittest.TestCase):
                 self.assertEqual(row["categories"], ["Entertainment", "Nature"])
 
     def test_video_publish_time_is_read_from_detail_payload_and_persisted(self):
-        page = '''<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">{"__DEFAULT_SCOPE__":{"webapp":{"video-detail":{"itemInfo":{"itemStruct":{"id":"123","createTime":"1789687900"}}}}}}</script>'''
+        page = '''<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">{"__DEFAULT_SCOPE__":{"webapp.video-detail":{"itemInfo":{"itemStruct":{"id":"123","createTime":"1789687900"}}}}}</script>'''
         self.assertEqual(published_at_from_video_page(page, "123"), "2026-09-17T23:31:40+00:00")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             cookies = root / "cookies.txt"
             cookies.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
             payload = {"TrendingVideos": [{"ItemId": "123", "ItemName": "test", "PlayCount": 100, "Author": {"UniqueId": "alice"}}], "HasMore": False}
-            with patch("video_collector.get", return_value=Mock(json=lambda: payload)), patch("video_collector.fetch_video_published_at", return_value="2026-09-17T23:31:40+00:00"):
+            with patch("video_collector.get", return_value=Mock(json=lambda: payload)), patch("video_collector.fetch_video_published_at", return_value="2026-09-17T23:31:40+00:00"), patch("video_collector.time.sleep"):
                 report = collect_videos(["US"], cookies, genres=["Entertainment"], output_root=root / "output", history_db=root / "history.db", detail_limit=1)
             self.assertEqual(report["countries"]["US"]["publish_times"]["resolved"], 1)
             with closing(connect(root / "history.db")) as conn:

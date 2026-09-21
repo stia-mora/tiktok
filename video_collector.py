@@ -58,7 +58,9 @@ def published_at_from_video_page(page_html, video_id):
     if not match:
         raise ValueError("Video detail payload missing")
     try:
-        item = json.loads(match.group(1))["__DEFAULT_SCOPE__"]["webapp"]["video-detail"]["itemInfo"]["itemStruct"]
+        scope = json.loads(match.group(1))["__DEFAULT_SCOPE__"]
+        detail = scope.get("webapp.video-detail") or scope["webapp"]["video-detail"]
+        item = detail["itemInfo"]["itemStruct"]
         timestamp = int(item["createTime"])
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("Video publication time missing") from exc
@@ -153,6 +155,7 @@ def collect_videos(countries, cookie_file, pages=0, genres=None, output_root=Non
                                     except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError):
                                         # A detail page is optional enrichment; list collection still completed.
                                         publish_times["failed"] += 1
+                                    time.sleep(0.35)
                                 rows_by_id[video_id] = row
                         result["pages"] += 1
                         status["pages"] += 1
