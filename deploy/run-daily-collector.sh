@@ -2,4 +2,4 @@
 set -eu
 
 cd /opt/tiktok
-exec /usr/bin/docker compose run --rm --no-deps collector
+exec /usr/bin/docker compose --profile collector run --rm --no-deps collector
