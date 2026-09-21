@@ -1,0 +1,9 @@
+.git
+.venv
+__pycache__
+*.pyc
+output
+.playwright-cli
+proxy.local.json
+*.cookies.txt
+*.log

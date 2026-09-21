@@ -1,8 +1,9 @@
 import sqlite3
 import os
+from pathlib import Path
 
 # Database path
-db_path = r"C:\Users\USER\Documents\Tunetouch\Code\Tiktok\testing\database\tiktokdb.db"
+db_path = os.environ.get("TIKTOK_DB_PATH", str(Path(__file__).resolve().parent / "output" / "tiktok-local.db"))
 
 # Ensure folder exists
 os.makedirs(os.path.dirname(db_path), exist_ok=True)

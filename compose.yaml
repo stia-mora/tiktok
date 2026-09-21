@@ -1,0 +1,19 @@
+services:
+  dashboard:
+    build:
+      context: .
+    restart: unless-stopped
+    volumes:
+      - ./output:/app/output:ro
+    expose:
+      - "8501"
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - dashboard
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro

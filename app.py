@@ -1,11 +1,16 @@
+import json
+from pathlib import Path
 import streamlit as st
 from streamlit_creators import show_creators
 from streamlit_posts import show_posts
 from streamlit_hashtags import show_hashtags
+from streamlit_ads import show_ads
+from streamlit_history import show_history
+from streamlit_video_materials import show_video_materials
 
 # === Page configuration ===
 st.set_page_config(
-    page_title="TikTok Dashboard",
+    page_title="TikTok 素材数据中心",
     page_icon="image/tiktok.png",
     layout="wide"
 )
@@ -47,10 +52,31 @@ st.markdown(
 
 # === Logo and title ===
 st.image("image/tiktok.png", width=80)
-st.title("TikTok Trending Dashboard")
+st.title("TikTok 素材数据中心")
+st.caption("广告与热门视频持续归档，在自己的历史数据库中检索和分析。")
+with st.expander("每日采集计划"):
+    st.write("北京时间每天 09:00 · 全部 28 个国家 / 地区 · 广告 + 11 类热门视频素材")
+    st.write("仅保存链接、文案、作者与指标，不自动下载视频文件。广告使用最近 30 天窗口，视频使用接口当前热门榜单。")
+    st.caption("本地任务依赖此电脑与 Codex 正常运行。未开机或登录失效期间的数据不保证能补采。")
+    daily_files = sorted((Path(__file__).resolve().parent / "output" / "daily").glob("*.json"), reverse=True)
+    if daily_files:
+        daily_state = json.loads(daily_files[0].read_text(encoding="utf-8"))
+        jobs = daily_state.get("countries", {})
+        st.write(f"最近执行日期：{daily_state['date']}；已完成 {sum(bool(item.get('complete')) for item in jobs.values())} / 56 个来源与国家任务。")
+    else:
+        st.caption("每日全量计划尚未执行；当前数据库已有手动实测数据。")
 
 # === Tabs ===
-tab1, tab2, tab3 = st.tabs(["Creators", "Posts", "Hashtags"])
+tab_ads, tab_videos, tab_history, tab1, tab2, tab3 = st.tabs(["广告采集", "视频素材", "历史数据库", "创作者", "早期视频数据", "热门话题"])
+
+with tab_videos:
+    show_video_materials()
+
+with tab_ads:
+    show_ads()
+
+with tab_history:
+    show_history()
 
 with tab1:
     show_creators()

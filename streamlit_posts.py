@@ -1,3 +1,6 @@
+from ui_zh import translate_genres
+import os
+from pathlib import Path
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -20,10 +23,10 @@ def show_posts():
             return str(n)
 
     # App title
-    st.markdown("### <u>Posts Dashboard</u>", unsafe_allow_html=True)
+    st.markdown("### 热门视频数据", unsafe_allow_html=True)
 
     # === Connect to SQLite DB and get available date range ===
-    db_path = "database/tiktokdb.db"
+    db_path = os.environ.get("TIKTOK_DB_PATH", str(Path(__file__).resolve().parent / "output" / "tiktok-local.db"))
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute("SELECT MIN(crawl_date), MAX(crawl_date) FROM posts")
@@ -31,12 +34,12 @@ def show_posts():
     conn.close()
 
     if not min_date or not max_date:
-        st.warning("No data available in posts table.")
+        st.warning("暂无热门视频数据。")
         return
 
     # === Date selection based on DB values ===
     selected_date = st.date_input(
-        "Select Date",
+        "选择采集日期",
         min_value=pd.to_datetime(min_date).date(),
         max_value=pd.to_datetime(max_date).date(),
         value=pd.to_datetime(max_date).date(),
@@ -51,18 +54,21 @@ def show_posts():
     conn.close()
 
     df = df.drop_duplicates(subset=["item_id", "user_id"], keep="first")
-    df_prev = df_prev.drop_duplicates(subset=["item_id", "user_id"], keep="first")  
+    df_prev = df_prev.drop_duplicates(subset=["item_id", "user_id"], keep="first")
 
     if df.empty:
-        st.warning("No data found for selected date.")
+        st.warning("所选日期暂无数据。")
         return
+
+    df = translate_genres(df)
+    df_prev = translate_genres(df_prev)
 
     # Format numbers for display
     df['play_count_dis'] = df['play_count'].apply(format_number)
     df['like_count_dis'] = df['like_count'].apply(format_number)
 
     # === KPI Overview with delta compared to previous day ===
-    st.subheader("Overall Metrics")
+    st.subheader("数据概览")
 
     # Current metrics
     total_plays = df['play_count'].sum()
@@ -104,21 +110,21 @@ def show_posts():
     # Display KPIs
     # First row: Top Creator & Top Genre
     row1_col1, row1_col2, row1_col3 = st.columns(3)
-    row1_col1.metric("Top Creator", top_creator_name, delta=format_number(top_creator_plays - prev_top_creator_plays))
-    row1_col2.metric("Top Creator Plays", format_number(top_creator_plays), delta=format_number(top_creator_plays - prev_top_creator_plays))
-    row1_col3.metric("Top Genre", top_genre_name, delta=format_number(top_genre_plays - prev_top_genre_plays))
+    row1_col1.metric("播放最多的创作者", top_creator_name, delta=format_number(top_creator_plays - prev_top_creator_plays))
+    row1_col2.metric("该创作者播放量", format_number(top_creator_plays), delta=format_number(top_creator_plays - prev_top_creator_plays))
+    row1_col3.metric("播放最多的分类", top_genre_name, delta=format_number(top_genre_plays - prev_top_genre_plays))
 
     # Second row: Top Genre Plays & Total Plays & Total Likes
     row2_col1, row2_col2, row2_col3 = st.columns(3)
-    row2_col1.metric("Top Genre Plays", format_number(top_genre_plays), delta=format_number(top_genre_plays - prev_top_genre_plays))
-    row2_col2.metric("Total Plays", format_number(total_plays), delta=format_number(total_plays - prev_total_plays))
-    row2_col3.metric("Total Likes", format_number(total_likes), delta=format_number(total_likes - prev_total_likes))
+    row2_col1.metric("该分类播放量", format_number(top_genre_plays), delta=format_number(top_genre_plays - prev_top_genre_plays))
+    row2_col2.metric("总播放量", format_number(total_plays), delta=format_number(total_plays - prev_total_plays))
+    row2_col3.metric("总点赞量", format_number(total_likes), delta=format_number(total_likes - prev_total_likes))
     # Optional: add more KPIs as needed
 
     # === Required Columns Check ===
     required_cols = {'genre', 'play_count', 'like_count'}
     if not required_cols.issubset(df.columns):
-        st.error("Database table must include columns: genre, play_count, like_count.")
+        st.error("数据库缺少内容分类、播放量或点赞量字段。")
         return
 
     # === Genre average statistics ===
@@ -126,47 +132,47 @@ def show_posts():
     genre_avg['play_count_dis'] = genre_avg['play_count'].apply(format_number)
     genre_avg['like_count_dis'] = genre_avg['like_count'].apply(format_number)
 
-    st.subheader("Average Metrics by Genre")
+    st.subheader("分类平均指标")
     st.data_editor(
         genre_avg[['genre','play_count','play_count_dis','like_count','like_count_dis']],
         column_config={
-            "genre": st.column_config.TextColumn("Genre"),
-            "play_count": st.column_config.NumberColumn("Avg Plays (Sort by)", format="%d"),
-            "play_count_dis": st.column_config.TextColumn("Avg Plays"),
-            "like_count": st.column_config.NumberColumn("Avg Likes (Sort by)", format="%d"),
-            "like_count_dis": st.column_config.TextColumn("Avg Likes"),
+            "genre": st.column_config.TextColumn("内容分类"),
+            "play_count": st.column_config.NumberColumn("平均播放量（排序值）", format="%d"),
+            "play_count_dis": st.column_config.TextColumn("平均播放量"),
+            "like_count": st.column_config.NumberColumn("平均点赞量（排序值）", format="%d"),
+            "like_count_dis": st.column_config.TextColumn("平均点赞量"),
         },
         hide_index=True,
-        use_container_width=True
+        width="stretch"
     )
 
     # === Charts & Remaining Sections ===
     # Play count by genre
-    st.subheader("Average Play Count by Genre")
+    st.subheader("各分类平均播放量")
     fig_play = px.bar(
         genre_avg,
         x="genre",
         y="play_count",
         color="genre",
-        labels={"genre": "Genre", "play_count": "Average Play Count"},
+        labels={"genre": "内容分类", "play_count": "平均播放量"},
         color_discrete_sequence=px.colors.qualitative.Set3
     )
-    st.plotly_chart(fig_play, use_container_width=True)
+    st.plotly_chart(fig_play, width="stretch")
 
     # Like count by genre
-    st.subheader("Average Like Count by Genre")
+    st.subheader("各分类平均点赞量")
     fig_like = px.bar(
         genre_avg,
         x="genre",
         y="like_count",
         color="genre",
-        labels={"genre": "Genre", "like_count": "Average Like Count"},
+        labels={"genre": "内容分类", "like_count": "平均点赞量"},
         color_discrete_sequence=px.colors.qualitative.Pastel
     )
-    st.plotly_chart(fig_like, use_container_width=True)
+    st.plotly_chart(fig_like, width="stretch")
 
     # Engagement Rate
-    st.subheader("Engagement Rate by Genre")
+    st.subheader("各分类点赞播放比")
     df["engagement_rate"] = df["like_count"] / df["play_count"]
     genre_engagement = df.groupby("genre")["engagement_rate"].mean().sort_values(ascending=False)
     fig_engagement = px.bar(
@@ -174,23 +180,23 @@ def show_posts():
         x=genre_engagement.index,
         y=genre_engagement.values,
         color=genre_engagement.index,
-        labels={"x": "Genre", "y": "Avg Engagement Rate"},
+        labels={"x": "内容分类", "y": "平均点赞播放比"},
         color_discrete_sequence=px.colors.qualitative.Safe
     )
     fig_engagement.update_yaxes(tickformat=".0%")
-    st.plotly_chart(fig_engagement, use_container_width=True)
+    st.plotly_chart(fig_engagement, width="stretch")
 
     # === Filter Top Videos / Creators ===
-    st.subheader("Filter Top Videos / Creators")
+    st.subheader("筛选热门视频和创作者")
     col1, col2 = st.columns(2)
     creators = df["nickname"].unique().tolist()
     genres = df["genre"].unique().tolist()
-    selected_creator = col1.selectbox("Select Creator", ["All"] + creators)
-    selected_genre = col2.selectbox("Select Genre", ["All"] + genres)
+    selected_creator = col1.selectbox("选择创作者", ["全部"] + creators)
+    selected_genre = col2.selectbox("选择内容分类", ["全部"] + genres)
     df_filtered = df.copy()
-    if selected_creator != "All":
+    if selected_creator != "全部":
         df_filtered = df_filtered[df_filtered["nickname"] == selected_creator]
-    if selected_genre != "All":
+    if selected_genre != "全部":
         df_filtered = df_filtered[df_filtered["genre"] == selected_genre]
 
     # === Top 20 Videos / Creators Combined Ranking ===
@@ -205,7 +211,7 @@ def show_posts():
     top_videos["play_count_creator_dis"] = top_videos["play_count_creator"].apply(format_number)
     top_videos["like_count_creator_dis"] = top_videos["like_count_creator"].apply(format_number)
 
-    st.subheader("Top 20 Videos & Creators Combined Ranking")
+    st.subheader("热门视频与创作者综合榜")
     st.data_editor(
         top_videos[[
             "url","nickname","genre",
@@ -214,67 +220,67 @@ def show_posts():
             "like_count_creator","like_count_creator_dis"
         ]],
         column_config={
-            "url": st.column_config.LinkColumn("Video Link"),
-            "nickname": st.column_config.TextColumn("Creator"),
-            "genre": st.column_config.TextColumn("Genre"),
-            "play_count": st.column_config.NumberColumn("Video Plays (Sort by)", format="%d"),
-            "play_count_dis": st.column_config.TextColumn("Video Plays"),
-            "like_count": st.column_config.NumberColumn("Video Likes (Sort by)", format="%d"),
-            "like_count_dis": st.column_config.TextColumn("Video Likes"),
-            "play_count_creator": st.column_config.NumberColumn("Total Plays (Creator)", format="%d"),
-            "play_count_creator_dis": st.column_config.TextColumn("Total Plays"),
-            "like_count_creator": st.column_config.NumberColumn("Total Likes (Creator)", format="%d"),
-            "like_count_creator_dis": st.column_config.TextColumn("Total Likes"),
+            "url": st.column_config.LinkColumn("视频链接"),
+            "nickname": st.column_config.TextColumn("创作者"),
+            "genre": st.column_config.TextColumn("内容分类"),
+            "play_count": st.column_config.NumberColumn("视频播放量（排序值）", format="%d"),
+            "play_count_dis": st.column_config.TextColumn("视频播放量"),
+            "like_count": st.column_config.NumberColumn("视频点赞量（排序值）", format="%d"),
+            "like_count_dis": st.column_config.TextColumn("视频点赞量"),
+            "play_count_creator": st.column_config.NumberColumn("创作者总播放量", format="%d"),
+            "play_count_creator_dis": st.column_config.TextColumn("总播放量"),
+            "like_count_creator": st.column_config.NumberColumn("创作者总点赞量", format="%d"),
+            "like_count_creator_dis": st.column_config.TextColumn("总点赞量"),
         },
         hide_index=True,
-        use_container_width=True
+        width="stretch"
     )
 
     # Correlation scatter plot
-    st.subheader("Correlation: Video Plays vs Likes")
+    st.subheader("视频播放量与点赞量的关系")
     fig_scatter = px.scatter(
         df_filtered,
         x="play_count",
         y="like_count",
         color="genre",
         hover_data=["nickname", "url"],
-        labels={"play_count": "Video Plays", "like_count": "Video Likes"}
+        labels={"play_count": "视频播放量", "like_count": "视频点赞量"}
     )
-    st.plotly_chart(fig_scatter, use_container_width=True)
+    st.plotly_chart(fig_scatter, width="stretch")
 
     # All Data Table
-    st.subheader("All Data from DB")
+    st.subheader("本地数据库明细")
     df_display = df.copy()
-    df_display.insert(0, "No.", range(1, len(df_display) + 1))
+    df_display.insert(0, "序号", range(1, len(df_display) + 1))
     df_display["user_id_str"] = df_display["user_id"].astype(str)
     df_display["item_id_str"] = df_display["item_id"].astype(str)
 
     col1, col2 = st.columns(2)
     creators = df_display["nickname"].dropna().unique().tolist()
-    selected_creator = col1.selectbox("Filter by Creator", ["All"] + creators)
+    selected_creator = col1.selectbox("按创作者筛选", ["全部"] + creators)
     genres = df_display["genre"].dropna().unique().tolist()
-    selected_genre = col2.selectbox("Filter by Genre", ["All"] + genres)
+    selected_genre = col2.selectbox("按内容分类筛选", ["全部"] + genres)
 
     df_filtered = df_display.copy()
-    if selected_creator != "All":
+    if selected_creator != "全部":
         df_filtered = df_filtered[df_filtered["nickname"] == selected_creator]
-    if selected_genre != "All":
+    if selected_genre != "全部":
         df_filtered = df_filtered[df_filtered["genre"] == selected_genre]
 
-    columns_to_show = ["No.","url","nickname","user_id_str","item_id_str","item_name","genre","like_count","play_count"]
+    columns_to_show = ["序号","url","nickname","user_id_str","item_id_str","item_name","genre","like_count","play_count"]
     st.data_editor(
         df_filtered[columns_to_show],
         column_config={
-            "No.": st.column_config.NumberColumn("No.", format="%d"),
-            "url": st.column_config.LinkColumn("Video Link"),
-            "nickname": st.column_config.TextColumn("Creator"),
-            "user_id_str": st.column_config.TextColumn("User ID"),
-            "item_id_str": st.column_config.TextColumn("Item ID"),
-            "item_name": st.column_config.TextColumn("Item Name"),
-            "genre": st.column_config.TextColumn("Genre"),
-            "like_count": st.column_config.NumberColumn("Likes", format="%d"),
-            "play_count": st.column_config.NumberColumn("Plays", format="%d"),
+            "序号": st.column_config.NumberColumn("序号", format="%d"),
+            "url": st.column_config.LinkColumn("视频链接"),
+            "nickname": st.column_config.TextColumn("创作者"),
+            "user_id_str": st.column_config.TextColumn("用户编号"),
+            "item_id_str": st.column_config.TextColumn("视频编号"),
+            "item_name": st.column_config.TextColumn("视频文案"),
+            "genre": st.column_config.TextColumn("内容分类"),
+            "like_count": st.column_config.NumberColumn("点赞量", format="%d"),
+            "play_count": st.column_config.NumberColumn("播放量", format="%d"),
         },
         hide_index=True,
-        use_container_width=True
+        width="stretch"
     )
