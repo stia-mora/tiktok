@@ -31,7 +31,7 @@ After the Cookie is installed, run:
 ```bash
 cd /opt/tiktok
 bash deploy/provision-collector.sh
-docker compose run --rm --no-deps collector
+docker compose --profile collector run --rm --no-deps collector
 ```
 
 The first command installs `/etc/cron.d/tiktok-collector`; logs and resumable run state are in `output/daily/`. The daily job is protected by a cross-platform file lock, so an overlapping run exits without duplicating collection.
