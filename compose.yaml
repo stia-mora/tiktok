@@ -27,4 +27,4 @@ services:
     volumes:
       - ./output:/app/output
       - ./deploy/daily_config.server.json:/app/daily_config.json:ro
-      - /opt/tiktok-secrets/tiktok-cookies.txt:/run/secrets/tiktok-cookies.txt:ro
+      - /opt/tiktok-secrets:/run/secrets/tiktok:ro

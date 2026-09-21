@@ -24,7 +24,9 @@ Install `deploy/nginx-tiktok-dashboard.conf` as an Nginx snippet inside the exis
 
 The collector runs in Docker every day at 09:00 Asia/Shanghai. The scheduler is host cron, but each run uses the pinned `/opt/tiktok` Git checkout and starts a one-off `collector` container. It never runs `git pull`, so code updates remain an explicit deployment action.
 
-Store the Netscape Cookie file outside the repository at `/opt/tiktok-secrets/tiktok-cookies.txt`, owned by root with mode `0600`. The file is mounted read-only only into the collector container. It is not in Git, the image, or the dashboard container.
+Store the Netscape Cookie files outside the repository as `/opt/tiktok-secrets/tiktok-cookies-1.txt` and `/opt/tiktok-secrets/tiktok-cookies-2.txt`, owned by root with mode `0600`. They are mounted read-only only into the collector container. They are not in Git, the image, or the dashboard container.
+
+For each source, the collector tries its active Cookie first. When a country request is incomplete or has upstream errors, it retries once with the other Cookie. A successful retry becomes the active Cookie for subsequent countries of that source. If both fail, the report preserves both sanitized error outcomes; this helps distinguish account throttling from a country or upstream permission restriction.
 
 After the Cookie is installed, run:
 

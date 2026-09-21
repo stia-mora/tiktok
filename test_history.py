@@ -47,7 +47,9 @@ class HistoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             config = root / "daily_config.json"
-            config.write_text(json.dumps({"countries": ["US"], "sources": ["ads", "videos"], "cookie_file": "unused", "period": 30, "video_genres": ["Entertainment"]}), encoding="utf-8")
+            cookies = root / "cookies.txt"
+            cookies.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+            config.write_text(json.dumps({"countries": ["US"], "sources": ["ads", "videos"], "cookie_file": str(cookies), "period": 30, "video_genres": ["Entertainment"]}), encoding="utf-8")
             status = {"pagination_complete": True, "errors": [], "status": "ok", "pages": 2, "records": 20}
             report = {"run_id": "example", "countries": {"US": status}}
             with patch.object(daily_collect, "ROOT", root), patch.object(daily_collect, "CONFIG", config), patch.object(daily_collect, "import_previous_runs"), patch.object(daily_collect, "collect_ads", return_value=report) as ads, patch.object(daily_collect, "collect_videos", return_value=report) as videos:
@@ -55,6 +57,22 @@ class HistoryTests(unittest.TestCase):
                 self.assertEqual(daily_collect.main(), 0)
                 ads.assert_called_once()
                 videos.assert_called_once()
+
+    def test_daily_runner_rotates_cookies_after_a_failed_country(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first_cookie = root / "first.cookies.txt"
+            second_cookie = root / "second.cookies.txt"
+            for cookie in (first_cookie, second_cookie):
+                cookie.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+            config = root / "daily_config.json"
+            config.write_text(json.dumps({"countries": ["US", "CA"], "sources": ["ads"], "cookie_files": [str(first_cookie), str(second_cookie)], "period": 30, "video_genres": ["Entertainment"]}), encoding="utf-8")
+            failed = {"run_id": "first", "countries": {"US": {"pagination_complete": False, "errors": [{"error": "rate_limited"}], "status": "failed", "pages": 0, "records": 0}}}
+            succeeded_us = {"run_id": "second", "countries": {"US": {"pagination_complete": True, "errors": [], "status": "ok", "pages": 1, "records": 5}}}
+            succeeded_ca = {"run_id": "third", "countries": {"CA": {"pagination_complete": True, "errors": [], "status": "ok", "pages": 1, "records": 5}}}
+            with patch.object(daily_collect, "ROOT", root), patch.object(daily_collect, "CONFIG", config), patch.object(daily_collect, "import_previous_runs"), patch.object(daily_collect, "collect_ads", side_effect=[failed, succeeded_us, succeeded_ca]) as ads:
+                self.assertEqual(daily_collect.main(), 0)
+                self.assertEqual([call.args[1] for call in ads.call_args_list], [str(first_cookie), str(second_cookie), str(second_cookie)])
 
 
 if __name__ == "__main__":
