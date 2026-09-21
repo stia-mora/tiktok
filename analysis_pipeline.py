@@ -465,7 +465,7 @@ def jev_input(candidate: ScoredCandidate) -> tuple[dict[str, Any], str]:
 
 def _answer_value(answer: Any) -> Any:
     if isinstance(answer, dict):
-        for key in ("value", "answer", "choice", "selected", "result", "label"):
+        for key in ("value", "answer", "choice", "score", "noul", "selected", "result", "label"):
             if key in answer:
                 return answer[key]
     return answer

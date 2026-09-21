@@ -71,15 +71,15 @@ class AnalysisPipelineTests(unittest.TestCase):
     def test_jev_result_is_fail_closed_and_queue_gate_is_deterministic(self):
         response = {
             "model": "jev-1.test", "answers": {
-                "route": {"value": "deep", "confidence": .91},
-                "creative_reusability": {"value": 8},
-                "commerce_conversion": {"value": 6},
-                "duplicate_risk": {"value": .1},
+                "route": {"choice": "deep", "confidence": .91},
+                "creative_reusability": {"score": 8},
+                "commerce_conversion": {"score": 6},
+                "duplicate_risk": {"noul": .1},
             },
         }
         parsed = parse_jev_response(response)
         self.assertTrue(should_enqueue(parsed))
-        response["answers"]["route"]["value"] = "unexpected"
+        response["answers"]["route"]["choice"] = "unexpected"
         with self.assertRaises(Exception):
             parse_jev_response(response)
 
