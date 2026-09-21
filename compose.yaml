@@ -3,17 +3,16 @@ services:
     build:
       context: .
     restart: unless-stopped
+    command:
+      - streamlit
+      - run
+      - app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.baseUrlPath=tiktok
+      - --server.headless=true
+      - --browser.gatherUsageStats=false
     volumes:
       - ./output:/app/output:ro
-    expose:
-      - "8501"
-
-  proxy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    depends_on:
-      - dashboard
     ports:
-      - "80:80"
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - "127.0.0.1:8501:8501"
