@@ -15,6 +15,7 @@ from analysis_pipeline import (
     age_bucket,
     call_vlm,
     claim_job,
+    enrich_publication_times,
     enqueue,
     ensure_schema,
     process_job,
@@ -80,6 +81,30 @@ class AnalysisPipelineTests(unittest.TestCase):
         response["answers"]["route"]["value"] = "unexpected"
         with self.assertRaises(Exception):
             parse_jev_response(response)
+
+    def test_publication_time_enrichment_updates_missing_recent_material(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "history.sqlite3"
+            observed = datetime.now(timezone.utc)
+            row = {
+                "material_id": "9000", "query_country": "US", "brand": "Creator",
+                "ad_text": "Caption", "video_file": "", "crawled_at": observed.isoformat(),
+                "likes": 10, "plays": 100, "categories": ["Lifestyle"],
+                "video_url": "https://v16.tiktokcdn.com/example.mp4",
+                "detail_url": "https://www.tiktok.com/@creator/video/9000",
+            }
+            save_run({"run_id": "20260921_120000_a", "started_at": observed.isoformat()}, [row], db)
+            resolved = "2026-09-20T12:00:00+00:00"
+            with patch("analysis_pipeline.fetch_video_published_at", return_value=resolved), patch("analysis_pipeline.time.sleep"):
+                result = enrich_publication_times(db, limit=1)
+            with closing(connect(db)) as conn:
+                material = conn.execute("SELECT published_at, published_at_source FROM materials WHERE material_id='9000'").fetchone()
+                enrichment = conn.execute("SELECT resolved_at, attempt_count FROM publication_enrichment WHERE material_id='9000'").fetchone()
+        self.assertEqual({"publish_attempted": 1, "publish_resolved": 1, "publish_failed": 0}, result)
+        self.assertEqual(resolved, material["published_at"])
+        self.assertEqual("tiktok_video_detail", material["published_at_source"])
+        self.assertIsNotNone(enrichment["resolved_at"])
+        self.assertEqual(1, enrichment["attempt_count"])
 
     def test_queue_claims_one_material_once(self):
         with tempfile.TemporaryDirectory() as directory:

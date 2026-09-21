@@ -29,7 +29,7 @@ import requests
 from ads_collector import ROOT
 from ads_store import connect
 from local_http import error_summary, proxy_options
-from video_collector import VIDEO_DB
+from video_collector import VIDEO_DB, fetch_video_published_at
 
 
 RULE_VERSION = "viral-v1"
@@ -43,6 +43,7 @@ MIN_AGE_HOURS = 6
 MAX_AGE_DAYS = 30
 QUALIFYING_SCORE = 75.0
 VLM_MAX_ATTEMPTS = 5
+PUBLISH_TIME_ENRICH_LIMIT = 100
 LEASE_SECONDS = 15 * 60
 MAX_MEDIA_BYTES = 80 * 1024 * 1024
 MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024
@@ -184,6 +185,15 @@ def ensure_schema(db_path: Path = VIDEO_DB) -> None:
             comments_json TEXT NOT NULL,
             PRIMARY KEY (material_id, analysis_version)
         );
+        CREATE TABLE IF NOT EXISTS publication_enrichment (
+            material_id TEXT PRIMARY KEY REFERENCES materials(material_id),
+            attempted_at TEXT NOT NULL,
+            resolved_at TEXT,
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            last_error_class TEXT
+        );
+        CREATE INDEX IF NOT EXISTS publication_enrichment_retry
+            ON publication_enrichment(resolved_at, attempted_at);
         """)
 
 
@@ -210,6 +220,67 @@ def _latest_material_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             continue
         output.append({**dict(row), "payload": payload})
     return output
+
+
+def enrich_publication_times(db_path: Path = VIDEO_DB, limit: int | None = None) -> dict[str, int]:
+    """Gradually resolve real timestamps for recently discovered historic videos.
+
+    Failed detail requests are recorded with only their exception class. Ordering
+    by the last attempt prevents a rate-limited batch from starving other videos.
+    """
+    ensure_schema(db_path)
+    limit = max(0, int(limit if limit is not None else os.environ.get("PUBLISH_TIME_ENRICH_LIMIT", PUBLISH_TIME_ENRICH_LIMIT)))
+    counts = {"publish_attempted": 0, "publish_resolved": 0, "publish_failed": 0}
+    if not limit:
+        return counts
+    cutoff = (utc_now() - timedelta(days=MAX_AGE_DAYS)).isoformat()
+    with closing(connect(db_path)) as conn:
+        candidates = conn.execute("""
+            WITH latest AS (
+                SELECT s.material_id, s.payload_json, ROW_NUMBER() OVER (
+                    PARTITION BY s.material_id ORDER BY s.observed_at DESC, s.country ASC, s.run_id DESC
+                ) AS row_number
+                FROM daily_snapshots AS s
+            )
+            SELECT m.material_id, l.payload_json
+            FROM materials AS m
+            JOIN latest AS l USING(material_id)
+            LEFT JOIN publication_enrichment AS e USING(material_id)
+            WHERE m.published_at IS NULL AND m.first_seen>=? AND l.row_number=1
+            ORDER BY e.attempted_at IS NOT NULL, e.attempted_at ASC, m.last_seen DESC
+            LIMIT ?
+        """, (cutoff, limit)).fetchall()
+    session = requests.Session()
+    session.trust_env = False
+    _load_tiktok_cookies(session)
+    try:
+        with closing(connect(db_path)) as conn, conn:
+            for candidate in candidates:
+                counts["publish_attempted"] += 1
+                material_id = str(candidate["material_id"])
+                try:
+                    payload = json.loads(candidate["payload_json"])
+                    detail_url = str(payload.get("detail_url") or "")
+                    published_at = fetch_video_published_at(detail_url, material_id, session)
+                    conn.execute("UPDATE materials SET published_at=?, published_at_source='tiktok_video_detail' WHERE material_id=? AND published_at IS NULL",
+                                 (published_at, material_id))
+                    conn.execute("""INSERT INTO publication_enrichment(material_id, attempted_at, resolved_at, attempt_count, last_error_class)
+                        VALUES (?, ?, ?, 1, NULL)
+                        ON CONFLICT(material_id) DO UPDATE SET attempted_at=excluded.attempted_at,
+                            resolved_at=excluded.resolved_at, attempt_count=publication_enrichment.attempt_count+1,
+                            last_error_class=NULL""", (material_id, iso_now(), iso_now()))
+                    counts["publish_resolved"] += 1
+                except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                    conn.execute("""INSERT INTO publication_enrichment(material_id, attempted_at, resolved_at, attempt_count, last_error_class)
+                        VALUES (?, ?, NULL, 1, ?)
+                        ON CONFLICT(material_id) DO UPDATE SET attempted_at=excluded.attempted_at,
+                            attempt_count=publication_enrichment.attempt_count+1,
+                            last_error_class=excluded.last_error_class""", (material_id, iso_now(), type(exc).__name__))
+                    counts["publish_failed"] += 1
+                time.sleep(.35)
+    finally:
+        session.close()
+    return counts
 
 
 def _observation_points_by_material(conn: sqlite3.Connection, material_ids: list[str]) -> dict[str, list[tuple[datetime, int]]]:
@@ -945,7 +1016,8 @@ def process_job(job: sqlite3.Row, db_path: Path = VIDEO_DB) -> None:
 
 
 def run_once(db_path: Path = VIDEO_DB, work: int = 1) -> dict[str, int]:
-    summary = evaluate_shortlist(db_path)
+    summary = enrich_publication_times(db_path)
+    summary.update(evaluate_shortlist(db_path))
     summary.update(processed=0, failed=0)
     for _ in range(max(0, work)):
         job = claim_job(db_path)
