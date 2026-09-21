@@ -9,5 +9,6 @@
   "time": "09:00",
   "download_per_country": 0,
   "sources": ["ads", "videos"],
+  "video_detail_limit": 20,
   "video_genres": ["Entertainment", "Beauty_Style", "Performance", "Sport & Outdoor", "Society", "Lifestyle", "Auto_Vehicle", "Talents", "Nature", "Culture_Education_Technology", "Supernatural_Horror"]
 }

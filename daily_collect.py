@@ -53,7 +53,7 @@ def collect_source(source, country, config, cookies):
     for offset in range(len(cookies)):
         index = (start + offset) % len(cookies)
         report = (collect_ads([country], cookies[index], pages=0, limit=20, period=config["period"], download_per_country=0, details=False)
-                  if source == "ads" else collect_videos([country], cookies[index], pages=0, genres=config["video_genres"]))
+                  if source == "ads" else collect_videos([country], cookies[index], pages=0, genres=config["video_genres"], detail_limit=config.get("video_detail_limit", 20)))
         status = report["countries"][country]
         final_run_id = report["run_id"]
         complete = status["pagination_complete"] and not status["errors"]

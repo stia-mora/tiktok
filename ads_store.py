@@ -50,6 +50,13 @@ def connect(db_path=DB_PATH, *, readonly=False):
         ) AS daily_rank FROM observations
     ) WHERE daily_rank=1;
     """)
+    # SQLite's CREATE TABLE IF NOT EXISTS cannot extend archives created by an
+    # older collector, so add this optional video-only metadata separately.
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(materials)")}
+    if "published_at" not in columns:
+        conn.execute("ALTER TABLE materials ADD COLUMN published_at TEXT")
+    if "published_at_source" not in columns:
+        conn.execute("ALTER TABLE materials ADD COLUMN published_at_source TEXT")
     return conn
 
 
@@ -67,14 +74,19 @@ def save_run(report, rows, db_path=DB_PATH):
                 instant = instant.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
             observed_at = instant.astimezone(timezone.utc).isoformat()
             observed_date = instant.astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
-            conn.execute("""INSERT INTO materials VALUES (?, ?, ?, ?, ?, ?)
+            conn.execute("""INSERT INTO materials
+                (material_id, first_seen, last_seen, brand, ad_text, video_file, published_at, published_at_source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(material_id) DO UPDATE SET
                 first_seen=MIN(materials.first_seen, excluded.first_seen),
                 last_seen=MAX(materials.last_seen, excluded.last_seen),
                 brand=CASE WHEN excluded.last_seen>=materials.last_seen THEN excluded.brand ELSE materials.brand END,
                 ad_text=CASE WHEN excluded.last_seen>=materials.last_seen THEN excluded.ad_text ELSE materials.ad_text END,
-                video_file=CASE WHEN excluded.video_file!='' THEN excluded.video_file ELSE materials.video_file END
-                """, (row["material_id"], observed_at, observed_at, row.get("brand", ""), row.get("ad_text", ""), row.get("video_file", "")))
+                video_file=CASE WHEN excluded.video_file!='' THEN excluded.video_file ELSE materials.video_file END,
+                published_at=COALESCE(materials.published_at, excluded.published_at),
+                published_at_source=COALESCE(materials.published_at_source, excluded.published_at_source)
+                """, (row["material_id"], observed_at, observed_at, row.get("brand", ""), row.get("ad_text", ""), row.get("video_file", ""),
+                      row.get("published_at"), row.get("published_at_source")))
             conn.execute("""INSERT INTO observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(run_id, country, material_id) DO UPDATE SET payload_json=excluded.payload_json""",
                          (report["run_id"], row["query_country"], row["material_id"], observed_at, observed_date,

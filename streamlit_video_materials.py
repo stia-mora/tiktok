@@ -51,7 +51,7 @@ def show_video_materials():
     a, b = st.columns(2)
     a.download_button("导出视频素材表格", (folder / "videos.csv").read_bytes(), f"视频素材_{folder.name}.csv", "text/csv")
     b.download_button("导出视频素材原始数据", path.read_bytes(), f"视频素材_{folder.name}.json", "application/json")
-    frame = pd.DataFrame([{"国家": country_name(row["query_country"]), "视频编号": row["material_id"], "作者": row["brand"], "文案": row["ad_text"], "播放量": row["plays"], "点赞量": row["likes"], "分类": "、".join(GENRES.get(value, value) for value in row["categories"]), "视频页面": row["detail_url"]} for row in rows])
+    frame = pd.DataFrame([{"国家": country_name(row["query_country"]), "视频编号": row["material_id"], "作者": row["brand"], "实际发布时间（UTC）": row.get("published_at") or "未获取", "文案": row["ad_text"], "播放量": row["plays"], "点赞量": row["likes"], "分类": "、".join(GENRES.get(value, value) for value in row["categories"]), "视频页面": row["detail_url"]} for row in rows])
     st.dataframe(frame, hide_index=True, width="stretch", column_config={"视频页面": st.column_config.LinkColumn("原视频页面", display_text="打开原视频")})
     index = st.selectbox("选择视频预览", range(len(rows)), format_func=lambda index: f"{country_name(rows[index]['query_country'])} · {rows[index]['brand']} · {rows[index]['material_id']}")
     row = rows[index]

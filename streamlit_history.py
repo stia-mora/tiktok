@@ -18,7 +18,7 @@ def show_history():
     source = st.radio("数据来源", ["广告素材", "热门视频素材"], horizontal=True, key="history_source")
     is_video = source == "热门视频素材"
     db_path = VIDEO_DB if is_video else DB_PATH
-    st.caption("分析仅查询本地历史数据，不请求官方接口。首次发现指本库第一次采到的日期，不是广告上线日期。")
+    st.caption("分析仅查询本地历史数据，不请求官方接口。首次发现指本库第一次采到的日期，不是广告上线日期。热门视频的实际发布时间来自视频详情页。")
     with closing(connect(db_path, readonly=True)) as conn:
         counts = conn.execute("SELECT COUNT(DISTINCT material_id), COUNT(*), MIN(observed_date), MAX(observed_date) FROM observations").fetchone()
         countries = [row[0] for row in conn.execute("SELECT DISTINCT country FROM observations ORDER BY country")]
@@ -44,7 +44,7 @@ def show_history():
         clause += " AND s.country=?"
         params.append(selected_country)
     with closing(connect(db_path, readonly=True)) as conn:
-        data = pd.read_sql_query(f"""SELECT s.*, m.first_seen FROM daily_snapshots s
+        data = pd.read_sql_query(f"""SELECT s.*, m.first_seen, m.published_at FROM daily_snapshots s
             JOIN materials m USING(material_id) WHERE {clause} ORDER BY s.observed_at DESC""", conn, params=params)
     if data.empty:
         st.info("所选日期和国家没有采集记录。缺少记录不代表当天没有广告。")
@@ -55,7 +55,7 @@ def show_history():
         payload = json.loads(record["payload_json"])
         rows.append({"日期": record["observed_date"], "国家": country_name(record["country"]), "素材编号": record["material_id"],
                      "品牌": payload.get("brand") or "未提供名称", "广告文案": payload.get("ad_text", ""), "播放量": payload.get("plays"),
-                     "点赞数": record["likes"], "点击率原始值": record["ctr_raw"], "首次发现": record["first_seen"],
+                     "点赞数": record["likes"], "点击率原始值": record["ctr_raw"], "首次发现": record["first_seen"], "实际发布时间": record["published_at"] or "未获取",
                      "视频地址": payload.get("video_url", ""), "广告详情": payload.get("detail_url", ""), "采集时间": record["observed_at"]})
     frame = pd.DataFrame(rows)
     if query:
@@ -85,7 +85,10 @@ def show_history():
     page = st.number_input("明细页码（每页 100 条）", 1, page_count, 1, key="history_page")
     shown = frame.iloc[(int(page) - 1) * 100:int(page) * 100].copy()
     shown["首次发现"] = pd.to_datetime(shown["首次发现"], utc=True).dt.tz_convert("Asia/Shanghai").dt.strftime("%Y-%m-%d %H:%M")
-    st.dataframe(shown, hide_index=True, width="stretch", column_order=["日期", "国家", "素材编号", "品牌", "广告详情", "广告文案", "播放量", "点赞数", "点击率原始值", "首次发现", "视频地址", "采集时间"], column_config={"品牌": brand_label, "广告文案": "视频文案" if is_video else "广告文案", "点击率原始值": None if is_video else "点击率原始值", "播放量": "播放量" if is_video else None, "广告详情": st.column_config.LinkColumn("原视频页面" if is_video else "官方广告页面", display_text="打开原视频" if is_video else "打开广告详情"), "视频地址": st.column_config.LinkColumn("临时媒体直链", display_text="临时链接", help="媒体 CDN 地址，可能过期或拒绝外部访问。观看请优先打开原视频或官方广告页面。")})
+    if is_video:
+        actual = pd.to_datetime(shown["实际发布时间"], errors="coerce", utc=True)
+        shown["实际发布时间"] = actual.dt.tz_convert("Asia/Shanghai").dt.strftime("%Y-%m-%d %H:%M").fillna("未获取")
+    st.dataframe(shown, hide_index=True, width="stretch", column_order=["日期", "国家", "素材编号", "品牌", "广告详情", "广告文案", "播放量", "点赞数", "点击率原始值", "实际发布时间", "首次发现", "视频地址", "采集时间"], column_config={"品牌": brand_label, "广告文案": "视频文案" if is_video else "广告文案", "点击率原始值": None if is_video else "点击率原始值", "播放量": "播放量" if is_video else None, "实际发布时间": "实际发布时间（北京时间）" if is_video else None, "广告详情": st.column_config.LinkColumn("原视频页面" if is_video else "官方广告页面", display_text="打开原视频" if is_video else "打开广告详情"), "视频地址": st.column_config.LinkColumn("临时媒体直链", display_text="临时链接", help="媒体 CDN 地址，可能过期或拒绝外部访问。观看请优先打开原视频或官方广告页面。")})
     st.caption("观看请点击“打开原视频 / 打开广告详情”。临时媒体直链不是网页地址，可能过期或受网络、播放权限限制。")
     output = io.StringIO()
     export_frame = frame.rename(columns={"品牌": brand_label, "广告文案": "视频文案" if is_video else "广告文案", "广告详情": "视频页面" if is_video else "广告详情"})
