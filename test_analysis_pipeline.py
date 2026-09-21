@@ -93,6 +93,8 @@ class AnalysisPipelineTests(unittest.TestCase):
         request, _ = jev_input(candidate)
         self.assertIsInstance(request["questions"]["creative_reusability"]["criteria"], list)
         self.assertIsInstance(request["questions"]["commerce_conversion"]["criteria"], list)
+        self.assertEqual("fresh_breakout", request["state"]["video"]["score_profile"])
+        self.assertIn("speed", request["state"]["video"]["score_components"])
 
     def test_publication_time_enrichment_updates_missing_recent_material(self):
         with tempfile.TemporaryDirectory() as directory:
