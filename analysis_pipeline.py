@@ -446,12 +446,12 @@ def jev_input(candidate: ScoredCandidate) -> tuple[dict[str, Any], str]:
         "creative_reusability": {
             "type": "score",
             "instructions": "Score reusable creative insight from 1 (none) to 10 (exceptional).",
-            "criteria": {"1": "No identifiable reusable device.", "10": "Specific, broadly reusable creative mechanism."},
+            "criteria": ["1: No identifiable reusable device.", "10: Specific, broadly reusable creative mechanism."],
         },
         "commerce_conversion": {
             "type": "score",
             "instructions": "Score observable conversion or e-commerce learning value from 1 (none) to 10 (exceptional).",
-            "criteria": {"1": "No conversion learning value.", "10": "Specific, credible conversion mechanism."},
+            "criteria": ["1: No conversion learning value.", "10: Specific, credible conversion mechanism."],
         },
         "duplicate_risk": {
             "type": "noul",

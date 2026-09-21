@@ -18,6 +18,7 @@ from analysis_pipeline import (
     enrich_publication_times,
     enqueue,
     ensure_schema,
+    jev_input,
     process_job,
     parse_jev_response,
     score_candidates,
@@ -81,6 +82,15 @@ class AnalysisPipelineTests(unittest.TestCase):
         response["answers"]["route"]["value"] = "unexpected"
         with self.assertRaises(Exception):
             parse_jev_response(response)
+
+    def test_jev_score_criteria_follow_the_typesafe_request_contract(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "history.sqlite3"
+            self.add_rows(db, count=1)
+            candidate = score_candidates(db, now=datetime(2026, 9, 22, 12, tzinfo=timezone.utc))[0]
+        request, _ = jev_input(candidate)
+        self.assertIsInstance(request["questions"]["creative_reusability"]["criteria"], list)
+        self.assertIsInstance(request["questions"]["commerce_conversion"]["criteria"], list)
 
     def test_publication_time_enrichment_updates_missing_recent_material(self):
         with tempfile.TemporaryDirectory() as directory:
