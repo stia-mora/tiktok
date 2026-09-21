@@ -1,6 +1,6 @@
 # Docker deployment on Ubuntu
 
-The application runs as a non-root Streamlit container. It listens only on `127.0.0.1:8501`; an existing host Nginx service proxies `/tiktok/` to it. Runtime data remains on the host under `/opt/tiktok/output` and is mounted read-only into the application.
+The application runs as a non-root Streamlit container. It listens only on `127.0.0.1:8501`; an existing host Nginx service proxies `/tiktok/` to it. Runtime data remains on the host under `/opt/tiktok/output`. The dashboard opens history databases read-only, while its mount permits SQLite WAL shared-memory coordination files.
 
 On a fresh Ubuntu server, run as `root`:
 

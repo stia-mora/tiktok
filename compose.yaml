@@ -13,7 +13,9 @@ services:
       - --server.headless=true
       - --browser.gatherUsageStats=false
     volumes:
-      - ./output:/app/output:ro
+      # SQLite WAL readers need to create shared-memory coordination files.
+      # The dashboard opens databases with mode=ro and PRAGMA query_only.
+      - ./output:/app/output
     ports:
       - "127.0.0.1:8501:8501"
 
