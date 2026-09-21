@@ -2,6 +2,8 @@
 __pycache__/
 output/
 *.cookies.txt
+*api-key*.txt
+*apikey*.txt
 *.log
 .playwright-cli/
 

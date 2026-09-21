@@ -33,6 +33,20 @@ services:
       - ./deploy/daily_config.server.json:/app/daily_config.json:ro
       - /opt/tiktok-secrets:/run/secrets/tiktok:ro
 
+  analyzer:
+    build:
+      context: .
+    profiles: ["analyzer"]
+    user: "0:0"
+    restart: "no"
+    command: ["python", "analysis_pipeline.py", "--work", "1"]
+    environment:
+      TIKTOK_PROXY_URL: http://proxy:7890
+      TIKTOK_COOKIE_FILE: /run/secrets/tiktok/tiktok-cookies-1.txt
+    volumes:
+      - ./output:/app/output
+      - /opt/tiktok-secrets:/run/secrets/tiktok:ro
+
   proxy:
     image: metacubex/mihomo:v1.19.31
     profiles: ["proxy"]

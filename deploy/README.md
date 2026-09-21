@@ -38,6 +38,28 @@ docker compose --profile collector run --rm --no-deps collector
 
 The first command installs `/etc/cron.d/tiktok-collector`; logs and resumable run state are in `output/daily/`. The daily job is protected by a cross-platform file lock, so an overlapping run exits without duplicating collection.
 
+## Automatic viral analysis
+
+The `analyzer` profile scans the previous 30 days of videos every 15 minutes. It scores newly eligible videos, asks Jev to route high-scoring candidates, and processes one accepted VLM job per invocation. This intentionally serializes expensive media work on the 2GB server.
+
+Store these files outside Git alongside the Cookies, owned by root with mode `0600`:
+
+```text
+/opt/tiktok-secrets/jev-api-key.txt
+/opt/tiktok-secrets/vlm-api-key.txt
+```
+
+They are mounted read-only only into the one-off analyzer container. The dashboard does not receive model credentials. On first deployment, run one worker invocation after the image is rebuilt:
+
+```bash
+cd /opt/tiktok
+docker compose build
+bash deploy/provision-collector.sh
+docker compose --profile analyzer run --rm --no-deps analyzer
+```
+
+Source MP4 files are temporary. Successful analysis retains the report, raw subtitle/comment extracts when available, and compressed keyframes beneath `output/analysis/`.
+
 ## Rotating outbound proxy
 
 Mihomo runs as a separate `proxy` service on the Docker network. Its HTTP proxy port is exposed only as `127.0.0.1:7897` on the host; the collector reaches it privately at `http://proxy:7890`. The `TIKTOK-EXIT` group distributes new connections across healthy subscription nodes using round-robin selection.

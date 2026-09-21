@@ -7,6 +7,7 @@ from streamlit_hashtags import show_hashtags
 from streamlit_ads import show_ads
 from streamlit_history import show_history
 from streamlit_video_materials import show_video_materials
+from streamlit_analysis import show_analysis
 
 # === Page configuration ===
 st.set_page_config(
@@ -75,7 +76,7 @@ with st.expander("每日采集计划"):
         st.caption("每日全量计划尚未执行；当前数据库已有手动实测数据。")
 
 # === Tabs ===
-tab_ads, tab_videos, tab_history, tab1, tab2, tab3 = st.tabs(["广告采集", "视频素材", "历史数据库", "创作者", "早期视频数据", "热门话题"])
+tab_ads, tab_videos, tab_history, tab_analysis, tab1, tab2, tab3 = st.tabs(["广告采集", "视频素材", "历史数据库", "爆款分析", "创作者", "早期视频数据", "热门话题"])
 
 with tab_videos:
     show_video_materials()
@@ -85,6 +86,9 @@ with tab_ads:
 
 with tab_history:
     show_history()
+
+with tab_analysis:
+    show_analysis()
 
 with tab1:
     show_creators()

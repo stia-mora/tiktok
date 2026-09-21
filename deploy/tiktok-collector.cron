@@ -3,3 +3,4 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 CRON_TZ=Asia/Shanghai
 
 0 9 * * * root /usr/local/bin/tiktok-daily-collector >> /opt/tiktok/output/daily/cron.log 2>&1
+*/15 * * * * root /usr/local/bin/tiktok-analysis-worker >> /opt/tiktok/output/analysis/worker.log 2>&1
