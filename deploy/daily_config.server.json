@@ -1,0 +1,10 @@
+{
+  "countries": ["AR", "AU", "BR", "CA", "CO", "FR", "DE", "ID", "IT", "JP", "MY", "MX", "NL", "PK", "PH", "RO", "SA", "SG", "ZA", "KR", "ES", "SE", "TH", "TR", "AE", "GB", "US", "VN"],
+  "period": 30,
+  "cookie_file": "/run/secrets/tiktok-cookies.txt",
+  "timezone": "Asia/Shanghai",
+  "time": "09:00",
+  "download_per_country": 0,
+  "sources": ["ads", "videos"],
+  "video_genres": ["Entertainment", "Beauty_Style", "Performance", "Sport & Outdoor", "Society", "Lifestyle", "Auto_Vehicle", "Talents", "Nature", "Culture_Education_Technology", "Supernatural_Horror"]
+}

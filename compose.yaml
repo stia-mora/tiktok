@@ -16,3 +16,15 @@ services:
       - ./output:/app/output:ro
     ports:
       - "127.0.0.1:8501:8501"
+
+  collector:
+    build:
+      context: .
+    profiles: ["collector"]
+    user: "0:0"
+    restart: "no"
+    command: ["python", "daily_collect.py"]
+    volumes:
+      - ./output:/app/output
+      - ./deploy/daily_config.server.json:/app/daily_config.json:ro
+      - /opt/tiktok-secrets/tiktok-cookies.txt:/run/secrets/tiktok-cookies.txt:ro

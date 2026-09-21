@@ -2,15 +2,36 @@
 from datetime import datetime
 import hashlib
 import json
-import msvcrt
+import os
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 from ads_collector import COUNTRIES, ROOT, collect_ads, write_json
 from ads_store import import_previous_runs
 from video_collector import collect_videos
 
 CONFIG = ROOT / "daily_config.json"
+
+
+def acquire_lock(lock):
+    lock.seek(0)
+    if os.name == "nt":
+        msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def release_lock(lock):
+    lock.seek(0)
+    if os.name == "nt":
+        msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def main():
@@ -23,9 +44,8 @@ def main():
         if lock.tell() == 0:
             lock.write(b"0")
             lock.flush()
-        lock.seek(0)
         try:
-            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            acquire_lock(lock)
         except OSError:
             print("Daily collection already running")
             return 3
@@ -55,8 +75,7 @@ def main():
                 print(json.dumps({"source": source, "country": code, **state["countries"][job_key]}, ensure_ascii=True), flush=True)
             return 0 if all(state["countries"].get(source + ":" + code, {}).get("complete") for source, code in jobs) else 2
         finally:
-            lock.seek(0)
-            msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            release_lock(lock)
 
 
 if __name__ == "__main__":
