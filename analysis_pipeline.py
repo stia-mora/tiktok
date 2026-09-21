@@ -505,8 +505,15 @@ def parse_jev_response(payload: Any) -> dict[str, Any]:
         duplicate = float(_answer_value(answers.get("duplicate_risk")))
     except (TypeError, ValueError) as exc:
         raise JevSchemaError("Jev response has invalid score answers") from exc
+    # TypeSafe's ``score`` type is normalized to 0-1 even when the question's
+    # instructions describe a 1-10 business scale. Persist the documented
+    # analysis scale consistently, so the >=7/10 VLM gate is unambiguous.
+    if 0 <= creative <= 1:
+        creative *= 10
+    if 0 <= conversion <= 1:
+        conversion *= 10
     confidence = _answer_confidence(route_answer)
-    if confidence is None or not 0 <= confidence <= 1 or not 1 <= creative <= 10 or not 1 <= conversion <= 10 or not 0 <= duplicate <= 1:
+    if confidence is None or not 0 <= confidence <= 1 or not 0 <= creative <= 10 or not 0 <= conversion <= 10 or not 0 <= duplicate <= 1:
         raise JevSchemaError("Jev response has out-of-range answers")
     return {
         "decision": route, "confidence": confidence, "creative_score": creative,

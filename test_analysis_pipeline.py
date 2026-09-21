@@ -72,12 +72,14 @@ class AnalysisPipelineTests(unittest.TestCase):
         response = {
             "model": "jev-1.test", "answers": {
                 "route": {"choice": "deep", "confidence": .91},
-                "creative_reusability": {"score": 8},
-                "commerce_conversion": {"score": 6},
+                "creative_reusability": {"score": .8},
+                "commerce_conversion": {"score": .6},
                 "duplicate_risk": {"noul": .1},
             },
         }
         parsed = parse_jev_response(response)
+        self.assertEqual(8, parsed["creative_score"])
+        self.assertEqual(6, parsed["conversion_score"])
         self.assertTrue(should_enqueue(parsed))
         response["answers"]["route"]["choice"] = "unexpected"
         with self.assertRaises(Exception):
