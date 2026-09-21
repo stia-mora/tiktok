@@ -10,8 +10,17 @@ ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "output" / "ads_history.sqlite3"
 
 
-def connect(db_path=DB_PATH):
+def connect(db_path=DB_PATH, *, readonly=False):
     path = Path(db_path)
+    if readonly:
+        # Dashboard queries run against a read-only mounted archive. SQLite must not
+        # initialize WAL or schema objects in that mode.
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA query_only=ON")
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=30)
     conn.row_factory = sqlite3.Row

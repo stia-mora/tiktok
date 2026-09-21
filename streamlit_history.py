@@ -19,7 +19,7 @@ def show_history():
     is_video = source == "热门视频素材"
     db_path = VIDEO_DB if is_video else DB_PATH
     st.caption("分析仅查询本地历史数据，不请求官方接口。首次发现指本库第一次采到的日期，不是广告上线日期。")
-    with closing(connect(db_path)) as conn:
+    with closing(connect(db_path, readonly=True)) as conn:
         counts = conn.execute("SELECT COUNT(DISTINCT material_id), COUNT(*), MIN(observed_date), MAX(observed_date) FROM observations").fetchone()
         countries = [row[0] for row in conn.execute("SELECT DISTINCT country FROM observations ORDER BY country")]
         days = conn.execute("SELECT COUNT(DISTINCT observed_date) FROM observations").fetchone()[0]
@@ -43,7 +43,7 @@ def show_history():
     if selected_country != "全部":
         clause += " AND s.country=?"
         params.append(selected_country)
-    with closing(connect(db_path)) as conn:
+    with closing(connect(db_path, readonly=True)) as conn:
         data = pd.read_sql_query(f"""SELECT s.*, m.first_seen FROM daily_snapshots s
             JOIN materials m USING(material_id) WHERE {clause} ORDER BY s.observed_at DESC""", conn, params=params)
     if data.empty:
