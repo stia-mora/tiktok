@@ -11,4 +11,4 @@ fi
 
 install -m 0755 "$project_dir/deploy/run-daily-collector.sh" /usr/local/bin/tiktok-daily-collector
 install -m 0644 "$project_dir/deploy/tiktok-collector.cron" /etc/cron.d/tiktok-collector
-systemctl reload cron
+systemctl restart cron
