@@ -839,7 +839,9 @@ def call_vlm(request: dict[str, Any], *, session: requests.Session | None = None
     last_error: Exception | None = None
     for attempt in range(VLM_MAX_ATTEMPTS):
         try:
-            response = session.post(url, headers={"Authorization": f"Bearer {secret}", "Content-Type": "application/json"}, json=request, timeout=(20, 180))
+            # A five-attempt retry cycle must remain inside the 15-minute cron
+            # cadence even when the gateway accepts a connection then hangs.
+            response = session.post(url, headers={"Authorization": f"Bearer {secret}", "Content-Type": "application/json"}, json=request, timeout=(10, 60))
             if response.status_code == 400 and not fallback_used:
                 # Some OpenAI-compatible gateways omit response_format support.
                 fallback_used = True
