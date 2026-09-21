@@ -57,12 +57,20 @@ st.caption("广告与热门视频持续归档，在自己的历史数据库中�
 with st.expander("每日采集计划"):
     st.write("北京时间每天 09:00 · 全部 28 个国家 / 地区 · 广告 + 11 类热门视频素材")
     st.write("仅保存链接、文案、作者与指标，不自动下载视频文件。广告使用最近 30 天窗口，视频使用接口当前热门榜单。")
-    st.caption("本地任务依赖此电脑与 Codex 正常运行。未开机或登录失效期间的数据不保证能补采。")
-    daily_files = sorted((Path(__file__).resolve().parent / "output" / "daily").glob("*.json"), reverse=True)
-    if daily_files:
-        daily_state = json.loads(daily_files[0].read_text(encoding="utf-8"))
-        jobs = daily_state.get("countries", {})
-        st.write(f"最近执行日期：{daily_state['date']}；已完成 {sum(bool(item.get('complete')) for item in jobs.values())} / 56 个来源与国家任务。")
+    st.caption("服务器每天按北京时间 09:00 执行；登录失效、上游限流或地区权限限制的任务会在状态记录中保留。")
+    daily_states = []
+    for path in (Path(__file__).resolve().parent / "output" / "daily").glob("*.json"):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(state, dict) and isinstance(state.get("date"), str) and isinstance(state.get("countries"), dict):
+            daily_states.append((path, state))
+    if daily_states:
+        _, daily_state = max(daily_states, key=lambda item: (item[1]["date"], item[0].stat().st_mtime))
+        jobs = daily_state["countries"]
+        completed = sum(bool(item.get("complete")) for item in jobs.values())
+        st.write(f"最近执行日期：{daily_state['date']}；已完成 {completed} / {len(jobs)} 个来源与国家任务。")
     else:
         st.caption("每日全量计划尚未执行；当前数据库已有手动实测数据。")
 
