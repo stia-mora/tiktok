@@ -24,7 +24,19 @@ services:
     user: "0:0"
     restart: "no"
     command: ["python", "daily_collect.py"]
+    environment:
+      TIKTOK_PROXY_URL: http://proxy:7890
     volumes:
       - ./output:/app/output
       - ./deploy/daily_config.server.json:/app/daily_config.json:ro
       - /opt/tiktok-secrets:/run/secrets/tiktok:ro
+
+  proxy:
+    image: ghcr.io/metacubex/mihomo:latest
+    profiles: ["proxy"]
+    restart: unless-stopped
+    command: ["-d", "/root/.config/mihomo", "-f", "/root/.config/mihomo/config.yaml"]
+    volumes:
+      - ./runtime/mihomo:/root/.config/mihomo:ro
+    ports:
+      - "127.0.0.1:7897:7890"

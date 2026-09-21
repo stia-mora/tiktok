@@ -6,3 +6,4 @@ output/
 .playwright-cli/
 
 proxy.local.json
+runtime/
