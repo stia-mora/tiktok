@@ -978,11 +978,9 @@ def fetch_subtitles_and_comments(detail_url: str, material_id: str) -> tuple[lis
     parsed = urlparse(detail_url)
     if parsed.scheme != "https" or parsed.hostname != "www.tiktok.com":
         return subtitles, comments, ["native_subtitle_unavailable", "comments_unavailable"], fresh_media_url
-    session = requests.Session()
-    session.trust_env = False
-    _load_tiktok_cookies(session)
+    session = tiktok_download_session()
     try:
-        response = session.get(detail_url, headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en;q=0.9"}, timeout=30, **proxy_options())
+        response = session.get(detail_url, timeout=30, **proxy_options())
         response.raise_for_status()
         match = re.search(r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">(.*?)</script>', response.text, re.DOTALL)
         scope = json.loads(match.group(1))["__DEFAULT_SCOPE__"] if match else {}

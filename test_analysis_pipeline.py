@@ -11,6 +11,7 @@ from analysis_pipeline import (
     ANALYSIS_VERSION,
     AnalysisError,
     RULE_VERSION,
+    _detail_play_url,
     VlmSchemaError,
     _extract_json,
     age_bucket,
@@ -167,6 +168,7 @@ class AnalysisPipelineTests(unittest.TestCase):
         self.assertFalse(valid_media_url("http://v16.tiktokcdn.com/object.mp4"))
         self.assertFalse(valid_media_url("https://example.com/object.mp4"))
         self.assertFalse(valid_media_url("https://www.tiktok.com/@creator/video/123"))
+        self.assertEqual("https://v16-webapp.tiktok.com/object.mp4", _detail_play_url({"video": {"playAddr": "https://v16-webapp.tiktok.com/object.mp4"}}))
         report = {key: "ok" for key in ("summary_zh", "viral_mechanisms", "hook", "creative_structure", "visual_language", "on_screen_text", "subtitle_summary", "audience", "comment_insights", "conversion_analysis", "reusable_playbook", "risks", "confidence", "missing_inputs")}
         self.assertEqual(report, _extract_json(json.dumps(report)))
         with self.assertRaises(VlmSchemaError):
