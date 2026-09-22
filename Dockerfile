@@ -25,6 +25,8 @@ EXPOSE 8501
 
 CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]
 
+FROM mwader/static-ffmpeg:7.1.1 AS ffmpeg
+
 FROM mcr.microsoft.com/playwright/python:v1.63.0-noble AS analyzer
 
 # This image already contains a Playwright-compatible Chromium and its OS
@@ -35,9 +37,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+# Avoid an Ubuntu package install during deployment: the server's configured
+# archive mirror can be unavailable, while these two binaries are static.
+COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
+COPY --from=ffmpeg /ffprobe /usr/local/bin/ffprobe
 
 COPY requirements-local.lock.txt requirements-analysis.lock.txt ./
 RUN pip install --no-cache-dir -r requirements-analysis.lock.txt
