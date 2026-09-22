@@ -25,14 +25,24 @@ EXPOSE 8501
 
 CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]
 
-FROM base AS analyzer
+FROM mcr.microsoft.com/playwright/python:v1.63.0-noble AS analyzer
 
-# Browser automation is kept out of the dashboard image.  Chromium is used by
-# TikTokApi only in the serial analysis worker.
-USER root
-COPY requirements-analysis.lock.txt ./
-RUN pip install --no-cache-dir -r requirements-analysis.lock.txt \
-    && python -m playwright install --with-deps chromium \
-    && rm -rf /var/lib/apt/lists/* /root/.cache/pip
+# This image already contains a Playwright-compatible Chromium and its OS
+# libraries. Installing a browser while building exhausted the 2 GB server.
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-local.lock.txt requirements-analysis.lock.txt ./
+RUN pip install --no-cache-dir -r requirements-analysis.lock.txt
+
+COPY . ./
+RUN mkdir -p /app/output
 
 CMD ["python", "analysis_pipeline.py", "--work", "1"]

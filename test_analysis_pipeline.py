@@ -9,6 +9,7 @@ from unittest.mock import patch
 from ads_store import connect, save_run
 from analysis_pipeline import (
     ANALYSIS_VERSION,
+    AnalysisError,
     RULE_VERSION,
     VlmSchemaError,
     _extract_json,
@@ -223,6 +224,47 @@ class AnalysisPipelineTests(unittest.TestCase):
         self.assertEqual("siliconflow_asr", transcript["source"])
         self.assertEqual(2, len(session.calls))
         sleep.assert_called_once_with(1)
+
+    def test_asr_rejected_request_is_not_retried(self):
+        class Response:
+            status_code = 422
+            headers = {}
+
+        class Session:
+            def __init__(self):
+                self.calls = 0
+
+            def post(self, *args, **kwargs):
+                self.calls += 1
+                return Response()
+
+        with tempfile.TemporaryDirectory() as directory:
+            audio = Path(directory) / "sample.mp3"
+            audio.write_bytes(b"ID3" + b"x" * 2048)
+            session = Session()
+            with patch("analysis_pipeline.read_secret", return_value="not-recorded"):
+                with self.assertRaisesRegex(AnalysisError, "AsrSchemaError"):
+                    call_siliconflow_asr(audio, session=session)
+        self.assertEqual(1, session.calls)
+
+    def test_vlm_rejected_request_is_not_retried(self):
+        class Response:
+            status_code = 422
+            headers = {}
+
+        class Session:
+            def __init__(self):
+                self.calls = 0
+
+            def post(self, *args, **kwargs):
+                self.calls += 1
+                return Response()
+
+        session = Session()
+        with patch("analysis_pipeline.read_secret", return_value="not-recorded"):
+            with self.assertRaisesRegex(AnalysisError, "VlmSchemaError"):
+                call_vlm({"model": "test"}, session=session)
+        self.assertEqual(1, session.calls)
 
     def test_comment_normalization_drops_account_identity(self):
         normalized = normalize_comment({

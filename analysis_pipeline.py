@@ -869,6 +869,8 @@ def call_siliconflow_asr(audio_file: Path, *, session: requests.Session | None =
                 continue
             if response.status_code in {401, 403}:
                 raise ConfigurationError("ASR authentication failed")
+            if response.status_code in {400, 404, 413, 415, 422}:
+                raise AsrSchemaError("ASR request was rejected")
             response.raise_for_status()
             body = response.json()
             text = _bounded_text(body.get("text") if isinstance(body, dict) else "", 12000)
@@ -1103,6 +1105,8 @@ def call_vlm(request: dict[str, Any], *, session: requests.Session | None = None
                 continue
             if response.status_code in {401, 403}:
                 raise ConfigurationError("VLM authentication failed")
+            if response.status_code in {400, 404, 413, 415, 422}:
+                raise VlmSchemaError("VLM request was rejected")
             response.raise_for_status()
             body = response.json()
             choices = body.get("choices") if isinstance(body, dict) else None
