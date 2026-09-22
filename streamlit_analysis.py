@@ -97,6 +97,16 @@ def show_analysis():
     report = json.loads(result["report_json"])
     st.markdown(f"### {report.get('summary_zh', '分析报告')}")
     evidence = report.get("evidence", {})
+    if not isinstance(evidence, dict):
+        evidence = {}
+    else:
+        evidence_columns = st.columns(4)
+        evidence_columns[0].metric("关键帧", len(evidence.get("frames", [])))
+        evidence_columns[1].metric("字幕段", int(evidence.get("subtitle_count", 0) or 0))
+        evidence_columns[2].metric("评论样本", int(evidence.get("comment_count", 0) or 0))
+        evidence_columns[3].metric("视频来源", "yt-dlp" if evidence.get("download") == "yt_dlp" else "CDN 备用")
+        with st.expander("证据采集状态"):
+            st.json({key: value for key, value in evidence.items() if key != "frames"}, expanded=False)
     frame_paths = evidence.get("frames", [])
     images = [ROOT / "output" / path for path in frame_paths if (ROOT / "output" / path).is_file()]
     if images:
@@ -113,6 +123,15 @@ def show_analysis():
                 st.json(value, expanded=False)
             else:
                 st.write(value or "未提供")
+    with st.expander("字幕与评论样本"):
+        try:
+            samples = {
+                "subtitles": json.loads(result["subtitles_json"]),
+                "comments": json.loads(result["comments_json"]),
+            }
+        except (TypeError, json.JSONDecodeError):
+            samples = {"status": "证据文件不可读"}
+        st.json(samples, expanded=False)
     left, right = st.columns(2)
     left.download_button("下载 JSON 报告", result["report_json"].encode("utf-8"), f"爆款分析_{material_id}.json", "application/json")
     right.download_button("下载 Markdown 报告", result["report_markdown"].encode("utf-8"), f"爆款分析_{material_id}.md", "text/markdown")

@@ -13,6 +13,8 @@ from analysis_pipeline import (
     VlmSchemaError,
     _extract_json,
     age_bucket,
+    backfill_accepted_jobs,
+    call_siliconflow_asr,
     call_vlm,
     claim_job,
     enrich_publication_times,
@@ -25,6 +27,7 @@ from analysis_pipeline import (
     should_enqueue,
     valid_media_url,
 )
+from comment_collector import normalize_comment
 
 
 class AnalysisPipelineTests(unittest.TestCase):
@@ -134,6 +137,22 @@ class AnalysisPipelineTests(unittest.TestCase):
             self.assertEqual(1, claimed["attempt_count"])
             self.assertIsNone(claim_job(db))
 
+    def test_analysis_version_backfill_queues_previously_accepted_material(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "history.sqlite3"
+            self.add_rows(db, count=1)
+            ensure_schema(db)
+            with closing(connect(db)) as conn, conn:
+                conn.execute("""INSERT INTO analysis_evaluations (
+                    material_id, evaluation_version, evaluated_at, observed_at, published_at, country, category, age_bucket,
+                    score, metrics_json, percentiles_json, input_hash, jev_decision, jev_confidence, creative_score,
+                    conversion_score, duplicate_risk, jev_model, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ("9000", RULE_VERSION, "2026-09-21T12:00:00+00:00", "2026-09-21T12:00:00+00:00", "2026-09-19T12:00:00+00:00",
+                     "US", "Lifestyle", "1-7d", 90, "{}", "{}", "hash", "deep", .9, 8, 8, .1, "jev-test", "evaluated"))
+            self.assertEqual(1, backfill_accepted_jobs(db))
+            self.assertEqual(0, backfill_accepted_jobs(db))
+
     def test_media_url_whitelist_and_vlm_json_contract(self):
         self.assertTrue(valid_media_url("https://v16.tiktokcdn.com/object.mp4"))
         self.assertTrue(valid_media_url("https://v1.tiktokv.com/object.mp4"))
@@ -170,6 +189,49 @@ class AnalysisPipelineTests(unittest.TestCase):
         with patch("analysis_pipeline.read_secret", return_value="not-recorded"), patch("analysis_pipeline.time.sleep") as sleep:
             self.assertEqual(report, call_vlm({"model": "test"}, session=Session()))
         sleep.assert_called_once_with(1)
+
+    def test_asr_uses_retry_after_and_never_logs_audio_or_secret(self):
+        class Response:
+            def __init__(self, status, body=None, headers=None):
+                self.status_code = status
+                self._body = body or {}
+                self.headers = headers or {}
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    raise RuntimeError("unexpected non-retry HTTP status")
+
+            def json(self):
+                return self._body
+
+        class Session:
+            def __init__(self):
+                self.responses = [Response(429, headers={"Retry-After": "1"}), Response(200, {"text": "hello world"})]
+                self.calls = []
+
+            def post(self, *args, **kwargs):
+                self.calls.append(kwargs)
+                return self.responses.pop(0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            audio = Path(directory) / "sample.mp3"
+            audio.write_bytes(b"ID3" + b"x" * 2048)
+            session = Session()
+            with patch("analysis_pipeline.read_secret", return_value="not-recorded"), patch("analysis_pipeline.time.sleep") as sleep:
+                transcript = call_siliconflow_asr(audio, session=session)
+        self.assertEqual("hello world", transcript["text"])
+        self.assertEqual("siliconflow_asr", transcript["source"])
+        self.assertEqual(2, len(session.calls))
+        sleep.assert_called_once_with(1)
+
+    def test_comment_normalization_drops_account_identity(self):
+        normalized = normalize_comment({
+            "cid": "comment-1", "text": "  useful   comment ", "digg_count": 7,
+            "reply_comment_total": 3, "create_time": 123, "user": {"unique_id": "private-account"},
+        })
+        self.assertEqual({"comment_id": "comment-1", "text": "useful comment", "likes": 7,
+                          "reply_count": 3, "created_at_unix": 123}, normalized)
+        self.assertNotIn("user", normalized)
 
     def test_failed_media_work_deletes_temporary_mp4(self):
         with tempfile.TemporaryDirectory() as directory:

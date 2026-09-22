@@ -33,7 +33,7 @@ from video_collector import VIDEO_DB, fetch_video_published_at
 
 
 RULE_VERSION = "viral-v2"
-ANALYSIS_VERSION = "vlm-v1"
+ANALYSIS_VERSION = "vlm-v2"
 JEV_MODEL = "jev-latest"
 JEV_API_URL = "https://api.typesafe.ai/v1/systemone"
 VLM_MODEL = "gemini-3.8-flash-high"
@@ -43,10 +43,15 @@ MIN_AGE_HOURS = 6
 MAX_AGE_DAYS = 30
 QUALIFYING_SCORE = 75.0
 VLM_MAX_ATTEMPTS = 5
+ASR_MAX_ATTEMPTS = 5
 PUBLISH_TIME_ENRICH_LIMIT = 100
 LEASE_SECONDS = 15 * 60
 MAX_MEDIA_BYTES = 80 * 1024 * 1024
 MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024
+MAX_ASR_AUDIO_BYTES = 50 * 1024 * 1024
+MAX_ASR_DURATION_SECONDS = 60 * 60
+ASR_MODEL = "XingChenAGI/XingChenASR-V3.2-Ultra"
+ASR_API_URL = "https://api.siliconflow.cn/v1/audio/transcriptions"
 ANALYSIS_ROOT = ROOT / "output" / "analysis"
 TMP_ROOT = ANALYSIS_ROOT / "tmp"
 ALLOWED_MEDIA_SUFFIXES = (".tiktokcdn.com", ".tiktokv.com", ".byteoversea.com")
@@ -66,6 +71,10 @@ class JevSchemaError(AnalysisError):
 
 
 class VlmSchemaError(AnalysisError):
+    pass
+
+
+class AsrSchemaError(AnalysisError):
     pass
 
 
@@ -183,6 +192,17 @@ def ensure_schema(db_path: Path = VIDEO_DB) -> None:
             frames_json TEXT NOT NULL,
             subtitles_json TEXT NOT NULL,
             comments_json TEXT NOT NULL,
+            evidence_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (material_id, analysis_version)
+        );
+        CREATE TABLE IF NOT EXISTS analysis_artifacts (
+            material_id TEXT NOT NULL REFERENCES materials(material_id),
+            analysis_version TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            subtitles_json TEXT NOT NULL,
+            comments_json TEXT NOT NULL,
+            missing_json TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
             PRIMARY KEY (material_id, analysis_version)
         );
         CREATE TABLE IF NOT EXISTS publication_enrichment (
@@ -195,6 +215,9 @@ def ensure_schema(db_path: Path = VIDEO_DB) -> None:
         CREATE INDEX IF NOT EXISTS publication_enrichment_retry
             ON publication_enrichment(resolved_at, attempted_at);
         """)
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(analysis_results)").fetchall()}
+        if "evidence_json" not in columns:
+            conn.execute("ALTER TABLE analysis_results ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}'")
 
 
 def _latest_material_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -609,6 +632,23 @@ def enqueue(conn: sqlite3.Connection, material_id: str) -> bool:
     return conn.total_changes > before
 
 
+def backfill_accepted_jobs(db_path: Path = VIDEO_DB) -> int:
+    """Queue already-approved material when the analysis implementation changes."""
+    ensure_schema(db_path)
+    queued = 0
+    with closing(connect(db_path)) as conn, conn:
+        rows = conn.execute("""SELECT material_id, jev_decision, jev_confidence, creative_score, conversion_score
+            FROM analysis_evaluations WHERE evaluation_version=?""", (RULE_VERSION,)).fetchall()
+        for row in rows:
+            result = {
+                "decision": row["jev_decision"], "confidence": row["jev_confidence"],
+                "creative_score": row["creative_score"], "conversion_score": row["conversion_score"],
+            }
+            if all(value is not None for value in result.values()) and should_enqueue(result) and enqueue(conn, row["material_id"]):
+                queued += 1
+    return queued
+
+
 def evaluate_shortlist(db_path: Path = VIDEO_DB, now: datetime | None = None) -> dict[str, int]:
     ensure_schema(db_path)
     # Fail before scanning the archive when a deployment omitted the secret.
@@ -718,6 +758,59 @@ def download_media(url: str, target: Path, *, session: requests.Session | None =
             target.unlink(missing_ok=True)
 
 
+def download_with_ytdlp(detail_url: str, target: Path) -> None:
+    """Download a single video through yt-dlp without exposing Cookie contents."""
+    parsed = urlparse(detail_url)
+    if parsed.scheme != "https" or parsed.hostname != "www.tiktok.com":
+        raise AnalysisError("TikTok detail URL is invalid for yt-dlp")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    free = shutil.disk_usage(target.parent).free
+    if free < MIN_FREE_BYTES + MAX_MEDIA_BYTES:
+        raise AnalysisError("Insufficient free disk space for video analysis")
+    template = str(target.with_suffix(".%(ext)s"))
+    command = [
+        "yt-dlp", "--no-playlist", "--no-warnings", "--no-progress", "--restrict-filenames",
+        "--max-filesize", str(MAX_MEDIA_BYTES), "--merge-output-format", "mp4", "--remux-video", "mp4",
+        "--socket-timeout", "120", "--retries", "2", "--output", template,
+    ]
+    cookie_file = Path(os.environ.get("TIKTOK_COOKIE_FILE", "/run/secrets/tiktok/tiktok-cookies-1.txt"))
+    if cookie_file.is_file():
+        command.extend(["--cookies", str(cookie_file)])
+    proxy = proxy_options().get("proxies", {}).get("https")
+    if proxy:
+        command.extend(["--proxy", proxy])
+    command.append(detail_url)
+    try:
+        subprocess.run(command, capture_output=True, check=True, timeout=180)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise AnalysisError("yt-dlp could not download the TikTok video") from exc
+    candidates = sorted(target.parent.glob(f"{target.stem}.*"), key=lambda path: path.stat().st_size, reverse=True)
+    source = next((path for path in candidates if path.suffix.lower() == ".mp4" and path.stat().st_size >= 1024), None)
+    if source is None:
+        raise AnalysisError("yt-dlp did not produce an MP4 video")
+    if source != target:
+        source.replace(target)
+    if target.stat().st_size > MAX_MEDIA_BYTES:
+        target.unlink(missing_ok=True)
+        raise AnalysisError("Video exceeds configured download limit")
+
+
+def download_analysis_video(detail_url: str, media_url: str, target: Path) -> str:
+    """Prefer yt-dlp; retain the whitelisted CDN route for transient extractor gaps."""
+    try:
+        download_with_ytdlp(detail_url, target)
+        return "yt_dlp"
+    except AnalysisError:
+        if not valid_media_url(media_url):
+            raise
+        session = tiktok_download_session()
+        try:
+            download_media(media_url, target, session=session)
+            return "tiktok_cdn_fallback"
+        finally:
+            session.close()
+
+
 def video_duration(media_file: Path) -> float:
     command = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(media_file)]
     try:
@@ -728,6 +821,66 @@ def video_duration(media_file: Path) -> float:
     except (OSError, subprocess.SubprocessError, ValueError):
         pass
     raise AnalysisError("Unable to inspect video duration with ffprobe")
+
+
+def extract_asr_audio(media_file: Path, target: Path) -> None:
+    """Create a bounded mono MP3 that remains below SiliconFlow upload limits."""
+    if video_duration(media_file) > MAX_ASR_DURATION_SECONDS:
+        raise AnalysisError("Video is longer than the ASR duration limit")
+    command = [
+        "ffmpeg", "-y", "-v", "error", "-i", str(media_file), "-vn", "-ac", "1", "-ar", "16000",
+        "-c:a", "libmp3lame", "-b:a", "64k", "-t", str(MAX_ASR_DURATION_SECONDS), str(target),
+    ]
+    try:
+        subprocess.run(command, capture_output=True, check=True, timeout=180)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise AnalysisError("Unable to extract audio for ASR") from exc
+    if not target.is_file() or target.stat().st_size < 1024:
+        raise AnalysisError("Video has no usable audio track")
+    if target.stat().st_size > MAX_ASR_AUDIO_BYTES:
+        raise AnalysisError("Extracted audio exceeds the ASR upload limit")
+
+
+def call_siliconflow_asr(audio_file: Path, *, session: requests.Session | None = None) -> dict[str, Any]:
+    """Transcribe one temporary audio file with bounded retries and no proxy/Cookie."""
+    if not audio_file.is_file() or audio_file.stat().st_size > MAX_ASR_AUDIO_BYTES:
+        raise AnalysisError("ASR audio file is unavailable or too large")
+    secret = read_secret("ASR_API_KEY_FILE", "siliconflow-asr-api-key.txt")
+    model = os.environ.get("SILICONFLOW_ASR_MODEL", ASR_MODEL)
+    url = os.environ.get("SILICONFLOW_ASR_API_URL", ASR_API_URL)
+    session = session or model_session()
+    last_error: Exception | None = None
+    for attempt in range(ASR_MAX_ATTEMPTS):
+        try:
+            with audio_file.open("rb") as audio:
+                response = session.post(
+                    url,
+                    headers={"Authorization": f"Bearer {secret}"},
+                    files={"file": ("audio.mp3", audio, "audio/mpeg"), "model": (None, model)},
+                    timeout=(10, 120),
+                )
+            if response.status_code in RETRYABLE_STATUS_CODES:
+                retry_after = safe_int(response.headers.get("Retry-After"))
+                delay = min(300, retry_after or 5 * (3 ** attempt))
+                last_error = AnalysisError(f"ASR temporary HTTP {response.status_code}")
+                if attempt == ASR_MAX_ATTEMPTS - 1:
+                    break
+                time.sleep(delay)
+                continue
+            if response.status_code in {401, 403}:
+                raise ConfigurationError("ASR authentication failed")
+            response.raise_for_status()
+            body = response.json()
+            text = _bounded_text(body.get("text") if isinstance(body, dict) else "", 12000)
+            if not text:
+                raise AsrSchemaError("ASR response has no transcript")
+            return {"language": "und", "text": text, "source": "siliconflow_asr", "model": model}
+        except (requests.RequestException, ValueError, AnalysisError) as exc:
+            last_error = exc
+            if isinstance(exc, (ConfigurationError, AsrSchemaError)) or attempt == ASR_MAX_ATTEMPTS - 1:
+                break
+            time.sleep(min(300, 5 * (3 ** attempt)))
+    raise AnalysisError(f"ASR transcription failed: {type(last_error).__name__}")
 
 
 def extract_keyframes(media_file: Path, material_id: str) -> list[str]:
@@ -805,14 +958,14 @@ def _detail_play_url(item: dict[str, Any]) -> str:
 
 
 def fetch_subtitles_and_comments(detail_url: str, material_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], str]:
-    """Best-effort public metadata enrichment; every failure is represented, not fatal."""
+    """Fetch native captions and a bounded public-comment sample independently."""
     missing: list[str] = []
     subtitles: list[dict[str, Any]] = []
     comments: list[dict[str, Any]] = []
     fresh_media_url = ""
     parsed = urlparse(detail_url)
     if parsed.scheme != "https" or parsed.hostname != "www.tiktok.com":
-        return subtitles, comments, ["subtitle_unavailable", "comments_unavailable"], fresh_media_url
+        return subtitles, comments, ["native_subtitle_unavailable", "comments_unavailable"], fresh_media_url
     session = requests.Session()
     session.trust_env = False
     _load_tiktok_cookies(session)
@@ -842,29 +995,24 @@ def fetch_subtitles_and_comments(detail_url: str, material_id: str) -> tuple[lis
                 except requests.RequestException:
                     text = ""
             if text:
-                subtitles.append({"language": _bounded_text(info.get("LanguageCode") or info.get("languageCode"), 32), "text": text})
+                subtitles.append({
+                    "language": _bounded_text(info.get("LanguageCode") or info.get("languageCode"), 32),
+                    "text": text,
+                    "source": "tiktok_native",
+                })
         if not subtitles:
-            missing.append("subtitle_unavailable")
+            missing.append("native_subtitle_unavailable")
     except (requests.RequestException, ValueError, KeyError, TypeError, json.JSONDecodeError):
-        missing.append("subtitle_unavailable")
-    try:
-        response = session.get("https://www.tiktok.com/api/comment/list/", params={"aid": "1988", "aweme_id": material_id, "count": "50", "cursor": "0"},
-                               headers={"User-Agent": "Mozilla/5.0", "Referer": detail_url}, timeout=30, **proxy_options())
-        response.raise_for_status()
-        data = response.json()
-        source = data.get("comments") or data.get("comment_list") or []
-        if not isinstance(source, list):
-            raise ValueError("Unexpected comments response")
-        for comment in source[:50]:
-            text = _bounded_text(comment.get("text"), 1000)
-            if text:
-                comments.append({"text": text, "likes": safe_int(comment.get("digg_count") or comment.get("like_count"))})
-        if not comments:
-            missing.append("comments_unavailable")
-    except (requests.RequestException, ValueError, TypeError, json.JSONDecodeError):
-        missing.append("comments_unavailable")
+        missing.append("native_subtitle_unavailable")
     finally:
         session.close()
+    try:
+        from comment_collector import collect_public_comments
+        comments = collect_public_comments(material_id)
+        if not comments:
+            missing.append("comments_empty")
+    except Exception:
+        missing.append("comments_unavailable")
     return subtitles, comments, sorted(set(missing)), fresh_media_url
 
 
@@ -988,11 +1136,41 @@ def _retry_at(attempt_count: int) -> str:
     return (utc_now() + timedelta(seconds=seconds)).isoformat()
 
 
-def complete_job(conn: sqlite3.Connection, job: sqlite3.Row, report: dict[str, Any], frames: list[str], subtitles: list[dict[str, Any]], comments: list[dict[str, Any]]) -> None:
+def _load_artifacts(conn: sqlite3.Connection, job: sqlite3.Row) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], dict[str, Any]] | None:
+    row = conn.execute("SELECT * FROM analysis_artifacts WHERE material_id=? AND analysis_version=?",
+                       (job["material_id"], job["analysis_version"])).fetchone()
+    if row is None:
+        return None
+    try:
+        subtitles = json.loads(row["subtitles_json"])
+        comments = json.loads(row["comments_json"])
+        missing = json.loads(row["missing_json"])
+        evidence = json.loads(row["evidence_json"])
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not all(isinstance(value, list) for value in (subtitles, comments, missing)) or not isinstance(evidence, dict):
+        return None
+    return subtitles, comments, [str(value) for value in missing], evidence
+
+
+def _save_artifacts(conn: sqlite3.Connection, job: sqlite3.Row, subtitles: list[dict[str, Any]], comments: list[dict[str, Any]], missing: list[str], evidence: dict[str, Any]) -> None:
+    conn.execute("""INSERT INTO analysis_artifacts
+        (material_id, analysis_version, updated_at, subtitles_json, comments_json, missing_json, evidence_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(material_id, analysis_version) DO UPDATE SET updated_at=excluded.updated_at,
+            subtitles_json=excluded.subtitles_json, comments_json=excluded.comments_json,
+            missing_json=excluded.missing_json, evidence_json=excluded.evidence_json""",
+        (job["material_id"], job["analysis_version"], iso_now(), json.dumps(subtitles, ensure_ascii=False),
+         json.dumps(comments, ensure_ascii=False), json.dumps(sorted(set(missing)), ensure_ascii=False),
+         json.dumps(evidence, ensure_ascii=False)))
+
+
+def complete_job(conn: sqlite3.Connection, job: sqlite3.Row, report: dict[str, Any], frames: list[str], subtitles: list[dict[str, Any]], comments: list[dict[str, Any]], evidence: dict[str, Any]) -> None:
     conn.execute("""INSERT OR REPLACE INTO analysis_results
-        (material_id, analysis_version, created_at, report_json, report_markdown, frames_json, subtitles_json, comments_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", (job["material_id"], job["analysis_version"], iso_now(), json.dumps(report, ensure_ascii=False),
-                                                report_markdown(report, job["material_id"]), json.dumps(frames), json.dumps(subtitles, ensure_ascii=False), json.dumps(comments, ensure_ascii=False)))
+        (material_id, analysis_version, created_at, report_json, report_markdown, frames_json, subtitles_json, comments_json, evidence_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", (job["material_id"], job["analysis_version"], iso_now(), json.dumps(report, ensure_ascii=False),
+                                                report_markdown(report, job["material_id"]), json.dumps(frames), json.dumps(subtitles, ensure_ascii=False),
+                                                json.dumps(comments, ensure_ascii=False), json.dumps(evidence, ensure_ascii=False)))
     conn.execute("""UPDATE analysis_jobs SET status='succeeded', completed_at=?, locked_until=NULL,
         last_error_class=NULL, last_error=NULL WHERE material_id=? AND analysis_version=?""",
                  (iso_now(), job["material_id"], job["analysis_version"]))
@@ -1010,6 +1188,7 @@ def fail_job(db_path: Path, job: sqlite3.Row, exc: Exception) -> None:
 
 def process_job(job: sqlite3.Row, db_path: Path = VIDEO_DB) -> None:
     media_file: Path | None = None
+    audio_file: Path | None = None
     try:
         with closing(connect(db_path, readonly=True)) as conn:
             row, payload = _json_payload_for_material(conn, job["material_id"])
@@ -1017,15 +1196,35 @@ def process_job(job: sqlite3.Row, db_path: Path = VIDEO_DB) -> None:
                                      (job["material_id"], job["evaluation_version"])).fetchone()
             if evaluation is None:
                 raise AnalysisError("Analysis job has no Jev evaluation")
+            artifacts = _load_artifacts(conn, job)
         TMP_ROOT.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(prefix=f"{job['material_id']}_", suffix=".mp4", dir=TMP_ROOT, delete=False) as temporary:
             media_file = Path(temporary.name)
-        subtitles, comments, missing, fresh_media_url = fetch_subtitles_and_comments(str(payload.get("detail_url", "")), job["material_id"])
-        download_session = tiktok_download_session()
-        try:
-            download_media(fresh_media_url or str(payload.get("video_url", "")), media_file, session=download_session)
-        finally:
-            download_session.close()
+        if artifacts is None:
+            subtitles, comments, missing, fresh_media_url = fetch_subtitles_and_comments(str(payload.get("detail_url", "")), job["material_id"])
+            evidence: dict[str, Any] = {"native_subtitles": len(subtitles), "comments": len(comments)}
+        else:
+            subtitles, comments, missing, evidence = artifacts
+            fresh_media_url = ""
+            evidence = {**evidence, "artifact_reused": True}
+        download_source = download_analysis_video(str(payload.get("detail_url", "")), fresh_media_url or str(payload.get("video_url", "")), media_file)
+        evidence["download"] = download_source
+        if not subtitles and artifacts is None:
+            with tempfile.NamedTemporaryFile(prefix=f"{job['material_id']}_", suffix=".mp3", dir=TMP_ROOT, delete=False) as temporary:
+                audio_file = Path(temporary.name)
+            try:
+                extract_asr_audio(media_file, audio_file)
+                transcript = call_siliconflow_asr(audio_file)
+                subtitles.append(transcript)
+                evidence["asr"] = {"status": "succeeded", "model": transcript["model"]}
+            except (AnalysisError, OSError):
+                missing.append("asr_unavailable")
+                evidence["asr"] = {"status": "unavailable"}
+        elif subtitles:
+            evidence.setdefault("asr", {"status": "not_needed"})
+        if artifacts is None:
+            with closing(connect(db_path)) as conn, conn:
+                _save_artifacts(conn, job, subtitles, comments, missing, evidence)
         frames = extract_keyframes(media_file, job["material_id"])
         request = build_vlm_request(row, payload, evaluation, frames, subtitles, comments, missing)
         report = call_vlm(request)
@@ -1035,20 +1234,26 @@ def process_job(job: sqlite3.Row, db_path: Path = VIDEO_DB) -> None:
         merged_missing = sorted(set(missing) | {str(item) for item in reported_missing})
         report["missing_inputs"] = merged_missing
         report["analysis_version"] = ANALYSIS_VERSION
-        report["evidence"] = {"frames": frames, "subtitle_count": len(subtitles), "comment_count": len(comments)}
+        evidence = {**evidence, "frames": frames, "subtitle_count": len(subtitles), "comment_count": len(comments)}
+        report["evidence"] = evidence
         with closing(connect(db_path)) as conn, conn:
-            complete_job(conn, job, report, frames, subtitles, comments)
+            complete_job(conn, job, report, frames, subtitles, comments, evidence)
     except Exception as exc:
         fail_job(db_path, job, exc)
         raise
     finally:
+        if audio_file:
+            audio_file.unlink(missing_ok=True)
         if media_file:
             media_file.unlink(missing_ok=True)
+            for leftover in media_file.parent.glob(f"{media_file.stem}.*"):
+                leftover.unlink(missing_ok=True)
 
 
 def run_once(db_path: Path = VIDEO_DB, work: int = 1) -> dict[str, int]:
     summary = enrich_publication_times(db_path)
     summary.update(evaluate_shortlist(db_path))
+    summary["backfilled"] = backfill_accepted_jobs(db_path)
     summary.update(processed=0, failed=0)
     for _ in range(max(0, work)):
         job = claim_job(db_path)

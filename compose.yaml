@@ -2,6 +2,7 @@ services:
   dashboard:
     build:
       context: .
+      target: dashboard
     restart: unless-stopped
     command:
       - streamlit
@@ -22,6 +23,7 @@ services:
   collector:
     build:
       context: .
+      target: dashboard
     profiles: ["collector"]
     user: "0:0"
     restart: "no"
@@ -36,6 +38,7 @@ services:
   analyzer:
     build:
       context: .
+      target: analyzer
     profiles: ["analyzer"]
     user: "0:0"
     restart: "no"

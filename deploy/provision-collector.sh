@@ -13,7 +13,7 @@ for cookie in "$secret_dir/tiktok-cookies-1.txt" "$secret_dir/tiktok-cookies-2.t
     fi
 done
 
-for secret in "$secret_dir/jev-api-key.txt" "$secret_dir/vlm-api-key.txt"; do
+for secret in "$secret_dir/jev-api-key.txt" "$secret_dir/vlm-api-key.txt" "$secret_dir/siliconflow-asr-api-key.txt"; do
     if [ ! -f "$secret" ]; then
         echo "Missing analysis secret at $secret" >&2
         exit 1

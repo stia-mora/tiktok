@@ -47,6 +47,7 @@ Store these files outside Git alongside the Cookies, owned by root with mode `06
 ```text
 /opt/tiktok-secrets/jev-api-key.txt
 /opt/tiktok-secrets/vlm-api-key.txt
+/opt/tiktok-secrets/siliconflow-asr-api-key.txt
 ```
 
 They are mounted read-only only into the one-off analyzer container. The dashboard does not receive model credentials. On first deployment, run one worker invocation after the image is rebuilt:
@@ -58,7 +59,9 @@ bash deploy/provision-collector.sh
 docker compose --profile analyzer run --rm --no-deps analyzer
 ```
 
-Source MP4 files are temporary. Successful analysis retains the report, raw subtitle/comment extracts when available, and compressed keyframes beneath `output/analysis/`.
+The analyzer uses `yt-dlp` for one temporary MP4 per job. It first preserves TikTok's native subtitles; where none are available, it creates a temporary 16 kHz mono MP3 and sends it to SiliconFlow ASR. The MP3 and source MP4 are deleted in every outcome. Successful analysis retains the report, raw subtitle/comment extracts when available, and compressed keyframes beneath `output/analysis/`.
+
+Comments are collected through a single TikTokApi/Playwright browser session using the existing private proxy and mounted Cookies. The collector samples at most 50 top-level public comments and stores only comment text, like count, reply count and comment time; it does not save account names, profile data, Cookie data or proxy credentials. A comment failure is recorded as missing evidence and never blocks visual analysis.
 
 ## Rotating outbound proxy
 

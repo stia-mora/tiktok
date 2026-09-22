@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -18,8 +18,21 @@ RUN pip install --no-cache-dir -r requirements-local.lock.txt
 COPY --chown=app:app . ./
 RUN mkdir -p /app/output && chown app:app /app/output
 
+FROM base AS dashboard
 USER app
 
 EXPOSE 8501
 
 CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]
+
+FROM base AS analyzer
+
+# Browser automation is kept out of the dashboard image.  Chromium is used by
+# TikTokApi only in the serial analysis worker.
+USER root
+COPY requirements-analysis.lock.txt ./
+RUN pip install --no-cache-dir -r requirements-analysis.lock.txt \
+    && python -m playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/* /root/.cache/pip
+
+CMD ["python", "analysis_pipeline.py", "--work", "1"]
