@@ -132,8 +132,14 @@ class AnalysisPipelineTests(unittest.TestCase):
             with closing(connect(db)) as conn, conn:
                 self.assertTrue(enqueue(conn, "9000"))
                 self.assertFalse(enqueue(conn, "9000"))
+                # An earlier legacy retry must not starve the current pipeline.
+                conn.execute("""INSERT INTO analysis_jobs
+                    (material_id, analysis_version, evaluation_version, status, next_attempt_at)
+                    VALUES (?, 'vlm-v1', ?, 'retry_wait', '2000-01-01T00:00:00+00:00')""",
+                             ("9000", RULE_VERSION))
             claimed = claim_job(db)
             self.assertEqual("9000", claimed["material_id"])
+            self.assertEqual(ANALYSIS_VERSION, claimed["analysis_version"])
             self.assertEqual("running", claimed["status"])
             self.assertEqual(1, claimed["attempt_count"])
             self.assertIsNone(claim_job(db))

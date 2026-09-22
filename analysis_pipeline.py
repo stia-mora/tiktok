@@ -705,8 +705,9 @@ def claim_job(db_path: Path = VIDEO_DB) -> sqlite3.Row | None:
     now = utc_now()
     with closing(connect(db_path)) as conn, conn:
         conn.execute("UPDATE analysis_jobs SET status='retry_wait', locked_until=NULL WHERE status='running' AND locked_until<?", (now.isoformat(),))
-        job = conn.execute("""SELECT * FROM analysis_jobs WHERE status IN ('pending', 'retry_wait')
-            AND next_attempt_at<=? ORDER BY next_attempt_at, material_id LIMIT 1""", (now.isoformat(),)).fetchone()
+        job = conn.execute("""SELECT * FROM analysis_jobs WHERE analysis_version=?
+            AND status IN ('pending', 'retry_wait') AND next_attempt_at<=?
+            ORDER BY next_attempt_at, material_id LIMIT 1""", (ANALYSIS_VERSION, now.isoformat())).fetchone()
         if job is None:
             return None
         conn.execute("""UPDATE analysis_jobs SET status='running', attempt_count=attempt_count+1,
