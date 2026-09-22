@@ -55,6 +55,14 @@ ASR_API_URL = "https://api.siliconflow.cn/v1/audio/transcriptions"
 ANALYSIS_ROOT = ROOT / "output" / "analysis"
 TMP_ROOT = ANALYSIS_ROOT / "tmp"
 ALLOWED_MEDIA_SUFFIXES = (".tiktokcdn.com", ".tiktokv.com", ".byteoversea.com")
+# TikTok detail pages currently expose signed playback URLs on these exact
+# webapp hosts. Keep this separate from the suffix list: www.tiktok.com and
+# arbitrary subdomains remain ineligible for download.
+ALLOWED_MEDIA_HOSTS = {
+    "v16-webapp.tiktok.com",
+    "v16-webapp-prime.tiktok.com",
+    "v19-webapp-prime.tiktok.com",
+}
 RETRYABLE_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
 
 
@@ -720,7 +728,8 @@ def claim_job(db_path: Path = VIDEO_DB) -> sqlite3.Row | None:
 def valid_media_url(value: Any) -> bool:
     parsed = urlparse(str(value or ""))
     host = (parsed.hostname or "").lower()
-    return parsed.scheme == "https" and not parsed.username and not parsed.password and any(host.endswith(suffix) for suffix in ALLOWED_MEDIA_SUFFIXES)
+    return (parsed.scheme == "https" and not parsed.username and not parsed.password
+            and (host in ALLOWED_MEDIA_HOSTS or any(host.endswith(suffix) for suffix in ALLOWED_MEDIA_SUFFIXES)))
 
 
 def download_media(url: str, target: Path, *, session: requests.Session | None = None) -> None:
