@@ -50,6 +50,11 @@ Store these files outside Git alongside the Cookies, owned by root with mode `06
 /opt/tiktok-secrets/siliconflow-asr-api-key.txt
 ```
 
+When a model gateway needs a separate egress path, set `MODEL_PROXY_URL` in
+`/opt/tiktok/.env` (mode `0600`) to a credential-free HTTP(S) proxy URL. It is
+used only for Jev, VLM, and ASR calls; TikTok downloads and their Cookies keep
+using `TIKTOK_PROXY_URL`.
+
 They are mounted read-only only into the one-off analyzer container. The dashboard does not receive model credentials. On first deployment, run one worker invocation after the image is rebuilt:
 
 ```bash
@@ -67,7 +72,11 @@ Comments are collected through a single TikTokApi/Playwright browser session usi
 
 Mihomo runs as a separate `proxy` service on the Docker network. Its HTTP proxy port is exposed only as `127.0.0.1:7897` on the host; the collector reaches it privately at `http://proxy:7890`. The `TIKTOK-EXIT` group distributes new connections across healthy subscription nodes using round-robin selection.
 
-The subscription provider file is stored outside Git at `/opt/tiktok/runtime/mihomo/providers/tiktok.yaml` with mode `0600`. After downloading or replacing that file, run:
+Store the downloaded Clash subscription outside Git at
+`/opt/tiktok/runtime/mihomo/providers/tiktok.raw.yaml` with mode `0600`.
+Provisioning extracts its `proxies` collection into the generated
+`tiktok.yaml` provider file, so do not edit that generated file directly.
+After downloading or replacing the raw subscription, run:
 
 ```bash
 cd /opt/tiktok

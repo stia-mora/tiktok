@@ -6,8 +6,8 @@ runtime_dir="$project_dir/runtime/mihomo"
 provider_file="$runtime_dir/providers/tiktok.yaml"
 raw_provider_file="$runtime_dir/providers/tiktok.raw.yaml"
 
-if [ ! -s "$provider_file" ]; then
-    echo "Missing Mihomo subscription provider at $provider_file" >&2
+if [ ! -s "$provider_file" ] && [ ! -s "$raw_provider_file" ]; then
+    echo "Missing Mihomo subscription provider at $raw_provider_file" >&2
     exit 1
 fi
 
