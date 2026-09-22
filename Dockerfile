@@ -42,7 +42,7 @@ WORKDIR /app
 COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 COPY --from=ffmpeg /ffprobe /usr/local/bin/ffprobe
 
-COPY requirements-local.lock.txt requirements-analysis.lock.txt ./
+COPY requirements-analysis.lock.txt ./
 RUN pip install --no-cache-dir -r requirements-analysis.lock.txt
 
 COPY . ./

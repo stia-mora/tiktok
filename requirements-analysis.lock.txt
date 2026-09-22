@@ -1,4 +1,4 @@
--r requirements-local.lock.txt
+requests==2.34.2
 TikTokApi==7.3.3
 playwright==1.63.0
 yt-dlp==2026.8.19
