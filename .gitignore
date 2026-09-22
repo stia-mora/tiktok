@@ -5,6 +5,7 @@ output/
 *api-key*.txt
 *apikey*.txt
 *.log
+.env
 .playwright-cli/
 
 proxy.local.json

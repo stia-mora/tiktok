@@ -10,6 +10,7 @@ from ads_store import connect, save_run
 from analysis_pipeline import (
     ANALYSIS_VERSION,
     AnalysisError,
+    ConfigurationError,
     RULE_VERSION,
     _detail_play_url,
     VlmSchemaError,
@@ -23,6 +24,7 @@ from analysis_pipeline import (
     enqueue,
     ensure_schema,
     jev_input,
+    model_session,
     process_job,
     parse_jev_response,
     score_candidates,
@@ -33,6 +35,16 @@ from comment_collector import normalize_comment
 
 
 class AnalysisPipelineTests(unittest.TestCase):
+    def test_model_session_uses_only_an_explicit_credential_free_proxy(self):
+        with patch.dict("analysis_pipeline.os.environ", {"MODEL_PROXY_URL": "http://model-proxy:7890"}):
+            session = model_session()
+        self.assertFalse(session.trust_env)
+        self.assertEqual("http://model-proxy:7890", session.proxies["https"])
+
+        with patch.dict("analysis_pipeline.os.environ", {"MODEL_PROXY_URL": "http://user:pass@model-proxy:7890"}):
+            with self.assertRaises(ConfigurationError):
+                model_session()
+
     def add_rows(self, db: Path, count=30, observations=1):
         observed = datetime(2026, 9, 21, 12, tzinfo=timezone.utc)
         rows = []

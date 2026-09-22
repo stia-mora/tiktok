@@ -143,6 +143,26 @@ def model_session() -> requests.Session:
     """Never inherit browser/TikTok cookies or implicit host proxy settings."""
     session = requests.Session()
     session.trust_env = False
+    proxy_url = os.environ.get("MODEL_PROXY_URL", "").strip()
+    if proxy_url:
+        parsed = urlparse(proxy_url)
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ConfigurationError("MODEL_PROXY_URL has an invalid port") from exc
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.path not in {"", "/"}
+            or parsed.params
+            or parsed.query
+            or parsed.fragment
+            or (port is not None and not 1 <= port <= 65535)
+        ):
+            raise ConfigurationError("MODEL_PROXY_URL must be a credential-free HTTP(S) proxy URL")
+        session.proxies.update({"http": proxy_url, "https": proxy_url})
     return session
 
 

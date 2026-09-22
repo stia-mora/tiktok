@@ -49,6 +49,7 @@ services:
     environment:
       TIKTOK_PROXY_URL: http://proxy:7890
       TIKTOK_COOKIE_FILE: /run/secrets/tiktok/tiktok-cookies-1.txt
+      MODEL_PROXY_URL: ${MODEL_PROXY_URL:-}
     volumes:
       - ./output:/app/output
       - /opt/tiktok-secrets:/run/secrets/tiktok:ro
