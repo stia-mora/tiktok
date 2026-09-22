@@ -39,6 +39,9 @@ services:
     build:
       context: .
       target: analyzer
+      # The host can reach PyPI directly while Docker's default build network
+      # intermittently times out on files.pythonhosted.org.
+      network: host
     profiles: ["analyzer"]
     user: "0:0"
     restart: "no"
